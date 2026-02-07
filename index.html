@@ -6,14 +6,10 @@
   <title>SignSmart | מערכת חתימה דיגיטלית</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700;800&display=swap" rel="stylesheet">
-  <!-- React 18 UMD -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel standalone for JSX -->
   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
-  <!-- PDF.js v3 UMD -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!-- pdf-lib UMD -->
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <style>
     body { font-family: 'Assistant', sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
@@ -26,17 +22,11 @@
 </head>
 <body>
   <div id="root"></div>
-
-  <!-- Template variables from Apps Script -->
   <script>
     var SCRIPT_URL = '<?= scriptUrl ?>';
     var INITIAL_SIGN_ID = '<?= signId ?>';
     var INITIAL_SIGNER_ID = '<?= signerId ?>';
-
-    // Setup PDF.js worker
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-    // Apps Script RPC wrapper
     function gasRun(fn) {
       var args = Array.prototype.slice.call(arguments, 1);
       return new Promise(function(resolve, reject) {
@@ -50,25 +40,29 @@
     const { useState, useEffect, useRef, useCallback } = React;
 
     // =============================================
-    // SVG ICONS
+    // ICONS
     // =============================================
     const ICONS = {
       Logo: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22V12"/><path d="M12 12 7.5 7.5"/><path d="M12 12l4.5-4.5"/><path d="M21 16v5h-5"/><path d="M3 16v5h5"/></svg>,
-      Home: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-      Plus: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
-      Share: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>,
-      Check: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>,
-      Mail: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>,
-      Phone: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
-      Alert: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
-      File: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14.5 2 14.5 7.5 20 7.5"/></svg>,
-      Trash: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
-      Edit: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
-      Dash: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>,
+      Home: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+      Plus: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+      Share: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>,
+      Check: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>,
+      Mail: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>,
+      Phone: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
+      Alert: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
+      File: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14.5 2 14.5 7.5 20 7.5"/></svg>,
+      Trash: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
+      Edit: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+      Dash: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>,
+      Clock: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+      User: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+      Eye: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+      Download: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
     };
 
     // =============================================
-    // UTILITY COMPONENTS
+    // UTILITIES
     // =============================================
     const Loader = ({ message = "טוען..." }) => (
       <div className="flex flex-col items-center justify-center p-12 space-y-4">
@@ -90,6 +84,32 @@
       );
     };
 
+    const fmtDate = (iso) => { if (!iso) return '---'; try { return new Date(iso).toLocaleString('he-IL', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch(e) { return iso; } };
+
+    const normalizePhone = (phone) => {
+      if (!phone) return '';
+      let d = phone.replace(/\D/g, '');
+      if (d.startsWith('0') && d.length >= 10) d = '972' + d.substring(1);
+      return d;
+    };
+
+    const parseUA = (ua) => {
+      if (!ua) return { browser: 'לא ידוע', os: 'לא ידוע', device: 'לא ידוע' };
+      let browser = 'לא ידוע', os = 'לא ידוע', device = 'מחשב';
+      if (/CriOS/i.test(ua)) browser = 'Chrome (iOS)';
+      else if (/Chrome\/(\d+)/i.test(ua)) browser = 'Chrome ' + ua.match(/Chrome\/(\d+)/i)[1];
+      else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
+      else if (/Firefox\/(\d+)/i.test(ua)) browser = 'Firefox ' + ua.match(/Firefox\/(\d+)/i)[1];
+      else if (/Edg/i.test(ua)) browser = 'Edge';
+      if (/iPhone/i.test(ua)) { os = 'iOS'; device = 'iPhone'; }
+      else if (/iPad/i.test(ua)) { os = 'iPadOS'; device = 'iPad'; }
+      else if (/Android/i.test(ua)) { os = 'Android'; device = 'Android'; }
+      else if (/Mac OS/i.test(ua)) { os = 'macOS'; device = 'Mac'; }
+      else if (/Windows/i.test(ua)) { os = 'Windows'; device = 'PC'; }
+      else if (/Linux/i.test(ua)) { os = 'Linux'; device = 'PC'; }
+      return { browser, os, device };
+    };
+
     // =============================================
     // SIGNATURE PAD
     // =============================================
@@ -98,55 +118,29 @@
       const [isDrawing, setIsDrawing] = useState(false);
       const [hasContent, setHasContent] = useState(false);
       const lastPos = useRef(null);
-
       useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        const canvas = canvasRef.current; if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        canvas.width = canvas.offsetWidth * 2;
-        canvas.height = canvas.offsetHeight * 2;
-        ctx.scale(2, 2);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = 2.5;
-        ctx.strokeStyle = '#1e293b';
+        canvas.width = canvas.offsetWidth * 2; canvas.height = canvas.offsetHeight * 2;
+        ctx.scale(2, 2); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.5; ctx.strokeStyle = '#1e293b';
       }, []);
-
-      const getPos = (e) => {
-        const canvas = canvasRef.current;
-        const rect = canvas.getBoundingClientRect();
-        const touch = e.touches ? (e.touches[0] || e.changedTouches[0]) : null;
-        const cX = touch ? touch.clientX : e.clientX;
-        const cY = touch ? touch.clientY : e.clientY;
-        return { x: cX - rect.left, y: cY - rect.top };
-      };
+      const getPos = (e) => { const r = canvasRef.current.getBoundingClientRect(); const t = e.touches ? (e.touches[0]||e.changedTouches[0]) : null; return { x: (t?t.clientX:e.clientX)-r.left, y: (t?t.clientY:e.clientY)-r.top }; };
       const startDraw = (e) => { e.preventDefault(); setIsDrawing(true); lastPos.current = getPos(e); setHasContent(true); };
-      const draw = (e) => {
-        if (!isDrawing || !lastPos.current) return;
-        e.preventDefault();
-        const ctx = canvasRef.current.getContext('2d');
-        const pos = getPos(e);
-        ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(pos.x, pos.y); ctx.stroke();
-        lastPos.current = pos;
-      };
+      const draw = (e) => { if (!isDrawing||!lastPos.current) return; e.preventDefault(); const ctx = canvasRef.current.getContext('2d'); const pos = getPos(e); ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(pos.x, pos.y); ctx.stroke(); lastPos.current = pos; };
       const stopDraw = () => { setIsDrawing(false); lastPos.current = null; };
-      const clearCanvas = () => { const c = canvasRef.current; c.getContext('2d').clearRect(0, 0, c.width, c.height); setHasContent(false); };
-      const save = () => { if (canvasRef.current && hasContent) onSave(canvasRef.current.toDataURL('image/png')); };
-
+      const clearCanvas = () => { const c = canvasRef.current; c.getContext('2d').clearRect(0,0,c.width,c.height); setHasContent(false); };
       return (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-lg rounded-[32px] p-8 shadow-2xl animate-slide-up border space-y-6">
-            <div className="flex justify-between items-center"><h3 className="text-xl font-black text-slate-800">חתימה דיגיטלית</h3><button onClick={onCancel} className="p-2 text-slate-400 hover:text-slate-600">&times;</button></div>
+            <div className="flex justify-between items-center"><h3 className="text-xl font-black text-slate-800">חתימה דיגיטלית</h3><button onClick={onCancel} className="p-2 text-slate-400 hover:text-slate-600 text-2xl">&times;</button></div>
             <p className="text-sm text-slate-400 font-medium">חתמו באצבע או בעזרת העכבר</p>
             <div className="relative border-2 border-dashed border-slate-200 rounded-2xl overflow-hidden bg-white">
-              <canvas ref={canvasRef} className="w-full cursor-crosshair" style={{height:'200px',touchAction:'none'}}
-                onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw}
-                onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw} />
+              <canvas ref={canvasRef} className="w-full cursor-crosshair" style={{height:'200px',touchAction:'none'}} onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw} onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw} />
               {!hasContent && <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><p className="text-slate-200 font-bold text-lg">חתמו כאן</p></div>}
             </div>
             <div className="flex gap-3">
               <button onClick={clearCanvas} className="flex-1 py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl hover:bg-slate-200">נקה</button>
-              <button onClick={save} disabled={!hasContent} className={`flex-1 py-4 font-bold rounded-2xl ${hasContent ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>אשר חתימה</button>
+              <button onClick={() => hasContent && onSave(canvasRef.current.toDataURL('image/png'))} disabled={!hasContent} className={`flex-1 py-4 font-bold rounded-2xl ${hasContent ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>אשר חתימה</button>
             </div>
           </div>
         </div>
@@ -154,41 +148,31 @@
     };
 
     // =============================================
-    // PDF VIEWER (renders PDF from base64)
+    // PDF VIEWER
     // =============================================
     const PDFViewer = ({ pdfBase64, currentPage = 1, onPageChange, children }) => {
       const containerRef = useRef(null);
       const [loading, setLoading] = useState(true);
       const [numPages, setNumPages] = useState(1);
-
       useEffect(() => {
         let mounted = true;
         (async () => {
-          if (!pdfBase64) return;
-          setLoading(true);
+          if (!pdfBase64) return; setLoading(true);
           try {
-            const raw = atob(pdfBase64);
-            const arr = new Uint8Array(raw.length);
+            const raw = atob(pdfBase64); const arr = new Uint8Array(raw.length);
             for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
             const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
             if (mounted) setNumPages(pdf.numPages);
             const page = await pdf.getPage(currentPage);
             const vp = page.getViewport({ scale: 1.5 });
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
             canvas.height = vp.height; canvas.width = vp.width;
             await page.render({ canvasContext: ctx, viewport: vp }).promise;
-            if (mounted && containerRef.current) {
-              containerRef.current.innerHTML = '';
-              containerRef.current.appendChild(canvas);
-              canvas.className = "w-full shadow-lg rounded-lg";
-              setLoading(false);
-            }
+            if (mounted && containerRef.current) { containerRef.current.innerHTML = ''; containerRef.current.appendChild(canvas); canvas.className = "w-full shadow-lg rounded-lg"; setLoading(false); }
           } catch (err) { console.error(err); if (mounted) setLoading(false); }
         })();
         return () => { mounted = false; };
       }, [pdfBase64, currentPage]);
-
       return (
         <div className="relative w-full flex flex-col items-center">
           {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-50 rounded-xl font-bold text-blue-600">טוען עמוד {currentPage}...</div>}
@@ -214,15 +198,8 @@
       const [isLoading, setIsLoading] = useState(true);
       const [toast, setToast] = useState(null);
       const [pdfCache, setPdfCache] = useState({});
-
       const showToast = (message, type) => setToast({ message, type: type || 'success' });
-
-      const loadPdf = async (fileId) => {
-        if (pdfCache[fileId]) return pdfCache[fileId];
-        const b64 = await gasRun('getFileBase64', fileId);
-        setPdfCache(prev => ({ ...prev, [fileId]: b64 }));
-        return b64;
-      };
+      const loadPdf = async (fileId) => { if (pdfCache[fileId]) return pdfCache[fileId]; const b64 = await gasRun('getFileBase64', fileId); setPdfCache(prev => ({ ...prev, [fileId]: b64 })); return b64; };
 
       useEffect(() => {
         (async () => {
@@ -232,13 +209,14 @@
               if (doc) { setDocuments([doc]); setSelectedId(INITIAL_SIGN_ID); setView('signing'); }
             } else {
               const [docs, cts] = await Promise.all([gasRun('getAllDocuments'), gasRun('getAllContacts')]);
-              setDocuments(docs || []);
-              setContacts(cts || []);
+              setDocuments(docs || []); setContacts(cts || []);
             }
           } catch (e) { console.error('Init error:', e); }
           setIsLoading(false);
         })();
       }, []);
+
+      const refreshDocs = async () => { try { const docs = await gasRun('getAllDocuments'); setDocuments(docs || []); } catch(e) {} };
 
       const handleFileUpload = async (file) => {
         setIsLoading(true);
@@ -246,23 +224,9 @@
           const reader = new FileReader();
           const b64 = await new Promise((res, rej) => { reader.onload = () => res(reader.result.split(',')[1]); reader.onerror = rej; reader.readAsDataURL(file); });
           const result = await gasRun('uploadFile', b64, file.name);
-          const newDoc = {
-            id: Math.random().toString(36).substr(2, 9),
-            title: file.name.replace(/\.pdf$/i, ''),
-            fileName: file.name,
-            fileId: result.fileId,
-            status: 'PENDING',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            signers: [{ id: 's1', name: '', email: '', phone: '', order: 1, hasSigned: false }],
-            fields: [],
-            signingOrder: 'SEQUENTIAL',
-            remindersEnabled: true
-          };
+          const newDoc = { id: Math.random().toString(36).substr(2, 9), title: file.name.replace(/\.pdf$/i, ''), fileName: file.name, fileId: result.fileId, status: 'PENDING', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), signers: [{ id: 's1', name: '', email: '', phone: '', order: 1, hasSigned: false }], fields: [], signingOrder: 'SEQUENTIAL', remindersEnabled: true, auditTrail: [] };
           await gasRun('saveDocument', newDoc);
-          setDocuments(prev => [newDoc, ...prev]);
-          setSelectedId(newDoc.id);
-          setView('editor');
+          setDocuments(prev => [newDoc, ...prev]); setSelectedId(newDoc.id); setView('editor');
           showToast('הקובץ הועלה בהצלחה!');
         } catch (err) { console.error(err); showToast('שגיאה בהעלאה', 'error'); }
         setIsLoading(false);
@@ -272,23 +236,15 @@
         const updated = { ...d, status: 'IN_PROGRESS', updatedAt: new Date().toISOString() };
         setDocuments(docs => docs.map(doc => doc.id === updated.id ? updated : doc));
         await gasRun('saveDocument', updated);
-        setSelectedId(d.id);
-        setView('share');
-        showToast('המסמך נשמר!');
+        setSelectedId(d.id); setView('share'); showToast('המסמך נשמר!');
       };
 
-      const handleDeleteDoc = async (id) => {
-        setDocuments(docs => docs.filter(d => d.id !== id));
-        await gasRun('deleteDocument', id);
-        showToast('המסמך נמחק');
-      };
-
+      const handleDeleteDoc = async (id) => { setDocuments(docs => docs.filter(d => d.id !== id)); await gasRun('deleteDocument', id); showToast('המסמך נמחק'); };
       const currentDoc = documents.find(d => d.id === selectedId);
 
       return (
         <div className="min-h-screen bg-slate-50 flex flex-col font-sans" dir="rtl">
           {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-
           {view !== 'signing' && (
             <header className="bg-white/90 backdrop-blur-md border-b border-slate-100 h-20 flex items-center justify-between sticky top-0 z-50 px-6 md:px-12 shadow-sm">
               <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setView('home'); setSelectedId(null); }}>
@@ -306,13 +262,12 @@
               </nav>
             </header>
           )}
-
           <main className="flex-grow container mx-auto px-4 md:px-12 py-10">
             {isLoading ? <Loader message="טוען את המערכת..." /> : (<>
-              {(view === 'home' || view === 'dashboard') && <HomeDashboard documents={documents} onEdit={(id) => { setSelectedId(id); setView('editor'); }} onDelete={handleDeleteDoc} onShare={(id) => { setSelectedId(id); setView('share'); }} onUpload={handleFileUpload} />}
-              {view === 'contacts' && <ContactsView contacts={contacts} setContacts={setContacts} />}
-              {view === 'editor' && currentDoc && <EditorView document={currentDoc} loadPdf={loadPdf} onSave={handleSaveDoc} onCancel={() => setView('home')} />}
-              {view === 'share' && currentDoc && <ShareCenter document={currentDoc} onClose={() => setView('home')} showToast={showToast} />}
+              {(view === 'home' || view === 'dashboard') && <HomeDashboard documents={documents} onEdit={(id) => { setSelectedId(id); setView('editor'); }} onDelete={handleDeleteDoc} onShare={(id) => { setSelectedId(id); setView('share'); }} onUpload={handleFileUpload} loadPdf={loadPdf} />}
+              {view === 'contacts' && <ContactsView contacts={contacts} setContacts={setContacts} documents={documents} loadPdf={loadPdf} />}
+              {view === 'editor' && currentDoc && <EditorView document={currentDoc} loadPdf={loadPdf} onSave={handleSaveDoc} onCancel={() => setView('home')} contacts={contacts} />}
+              {view === 'share' && currentDoc && <ShareCenter document={currentDoc} onClose={() => { refreshDocs(); setView('home'); }} showToast={showToast} />}
               {view === 'signing' && currentDoc && <SignerProcess document={currentDoc} loadPdf={loadPdf} onComplete={() => setView('home')} showToast={showToast} />}
             </>)}
           </main>
@@ -321,17 +276,55 @@
     };
 
     // =============================================
-    // HOME DASHBOARD
+    // HOME DASHBOARD (improved status + timeline)
     // =============================================
-    const HomeDashboard = ({ documents, onEdit, onDelete, onShare, onUpload }) => {
+    const HomeDashboard = ({ documents, onEdit, onDelete, onShare, onUpload, loadPdf }) => {
       const [search, setSearch] = useState('');
+      const [expandedId, setExpandedId] = useState(null);
       const filtered = documents.filter(d => d.title.toLowerCase().includes(search.toLowerCase()));
       const copyLink = (id) => { navigator.clipboard.writeText(SCRIPT_URL + '?sign=' + id); };
-      const badge = (status) => {
-        const s = { PENDING:'bg-slate-100 text-slate-600', IN_PROGRESS:'bg-amber-50 text-amber-600 border border-amber-100', COMPLETED:'bg-green-50 text-green-600 border border-green-100', EXPIRED:'bg-red-50 text-red-600' };
+
+      const statusBadge = (status) => {
+        const s = { PENDING:'bg-slate-100 text-slate-700 border border-slate-200', IN_PROGRESS:'bg-amber-50 text-amber-700 border border-amber-200', COMPLETED:'bg-green-50 text-green-700 border border-green-200', EXPIRED:'bg-red-50 text-red-700 border border-red-200' };
         const l = { PENDING:'טיוטה', IN_PROGRESS:'ממתין לחתימה', COMPLETED:'נחתם', EXPIRED:'פג תוקף' };
-        return <span className={`px-3 py-1 rounded-full text-[10px] font-black ${s[status] || s.PENDING}`}>{l[status] || status}</span>;
+        return <span className={`px-4 py-1.5 rounded-full text-sm font-black ${s[status] || s.PENDING}`}>{l[status] || status}</span>;
       };
+
+      const TimelineRow = ({ doc }) => (
+        <tr><td colSpan={5} className="px-8 py-6 bg-slate-50/80 border-t border-slate-100">
+          <div className="flex flex-wrap gap-8 items-start">
+            <div className="flex-1 min-w-[250px]">
+              <p className="text-xs font-black text-slate-400 uppercase mb-4">ציר זמן</p>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs ${doc.createdAt?'bg-blue-500':'bg-slate-200'}`}><ICONS.Plus className="w-4 h-4"/></div><div><p className="font-bold text-slate-700 text-sm">נוצר</p><p className="text-xs text-slate-400">{fmtDate(doc.createdAt)}</p></div></div>
+                <div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs ${doc.sentAt?'bg-purple-500':'bg-slate-200'}`}><ICONS.Share className="w-4 h-4"/></div><div><p className="font-bold text-slate-700 text-sm">נשלח</p><p className="text-xs text-slate-400">{fmtDate(doc.sentAt)}</p></div></div>
+                <div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs ${doc.openedAt?'bg-orange-500':'bg-slate-200'}`}><ICONS.Eye className="w-4 h-4"/></div><div><p className="font-bold text-slate-700 text-sm">נפתח</p><p className="text-xs text-slate-400">{fmtDate(doc.openedAt)}</p></div></div>
+                <div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs ${doc.signedAt?'bg-green-500':'bg-slate-200'}`}><ICONS.Check className="w-4 h-4"/></div><div><p className="font-bold text-slate-700 text-sm">נחתם</p><p className="text-xs text-slate-400">{fmtDate(doc.signedAt)}</p></div></div>
+              </div>
+            </div>
+            <div className="flex-1 min-w-[200px]">
+              <p className="text-xs font-black text-slate-400 uppercase mb-4">חותמים</p>
+              {(doc.signers||[]).map(s => (
+                <div key={s.id} className="flex items-center gap-3 mb-3 p-3 bg-white rounded-xl border">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${s.hasSigned?'bg-green-500':'bg-slate-300'}`}>{(s.name||'?')[0]}</div>
+                  <div><p className="font-bold text-sm text-slate-700">{s.name||'ללא שם'}</p><p className="text-[10px] text-slate-400">{s.email||''} {s.phone||''}</p></div>
+                  <span className={`mr-auto px-2 py-0.5 rounded-full text-[10px] font-bold ${s.hasSigned?'bg-green-100 text-green-600':'bg-amber-100 text-amber-600'}`}>{s.hasSigned?'חתם':'ממתין'}</span>
+                </div>
+              ))}
+            </div>
+            {doc.signingAudit && <div className="flex-1 min-w-[200px]">
+              <p className="text-xs font-black text-slate-400 uppercase mb-4">פרטי מכשיר</p>
+              <div className="p-4 bg-white rounded-xl border text-sm space-y-2">
+                <p><span className="text-slate-400 font-bold">מכשיר: </span><span className="text-slate-700">{doc.signingAudit.device}</span></p>
+                <p><span className="text-slate-400 font-bold">דפדפן: </span><span className="text-slate-700">{doc.signingAudit.browser}</span></p>
+                <p><span className="text-slate-400 font-bold">מערכת: </span><span className="text-slate-700">{doc.signingAudit.os}</span></p>
+                <p><span className="text-slate-400 font-bold">רזולוציה: </span><span className="text-slate-700">{doc.signingAudit.screenRes}</span></p>
+              </div>
+            </div>}
+          </div>
+        </td></tr>
+      );
+
       return (
         <div className="space-y-10 animate-slide-up">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -343,29 +336,27 @@
           <div className="bg-white rounded-[32px] shadow-sm border overflow-hidden">
             <div className="p-8 border-b bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
               <div className="flex items-center gap-4"><div className="bg-blue-600 p-2.5 rounded-2xl text-white"><ICONS.Dash className="w-5 h-5" /></div><h3 className="text-lg font-black text-slate-800">ניהול מסמכים</h3></div>
-              <div className="relative w-full md:w-80">
-                <input type="text" placeholder="חיפוש..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-12 pr-6 py-3 bg-white border rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-50" />
-                <svg className="absolute left-4 top-3 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-              </div>
+              <div className="relative w-full md:w-80"><input type="text" placeholder="חיפוש..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-12 pr-6 py-3 bg-white border rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-50" /><svg className="absolute left-4 top-3 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-right">
                 <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest"><tr><th className="px-8 py-5">מסמך</th><th className="px-8 py-5 text-center">סטטוס</th><th className="px-8 py-5 text-center">חותמים</th><th className="px-8 py-5">תאריך</th><th className="px-8 py-5 text-left">פעולות</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map(doc => (
-                    <tr key={doc.id} className="hover:bg-blue-50/30 group">
-                      <td className="px-8 py-6"><div className="flex items-center gap-4"><div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><ICONS.File className="w-5 h-5" /></div><div><p className="font-bold text-slate-800">{doc.title}</p><p className="text-[10px] text-slate-400">{doc.fileName}</p></div></div></td>
-                      <td className="px-8 py-6 text-center">{badge(doc.status)}</td>
-                      <td className="px-8 py-6 text-center"><div className="flex justify-center -space-x-2 space-x-reverse">{(doc.signers||[]).map(s => <div key={s.id} className={`w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-bold text-white shadow-sm ${s.hasSigned ? 'bg-green-500' : 'bg-slate-300'}`}>{(s.name||'?')[0]}</div>)}</div></td>
-                      <td className="px-8 py-6"><span className="text-sm text-slate-500">{new Date(doc.createdAt).toLocaleDateString('he-IL')}</span></td>
-                      <td className="px-8 py-6"><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {filtered.map(doc => (<React.Fragment key={doc.id}>
+                    <tr className="hover:bg-blue-50/30 group cursor-pointer" onClick={() => setExpandedId(expandedId === doc.id ? null : doc.id)}>
+                      <td className="px-8 py-6"><div className="flex items-center gap-4"><div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><ICONS.File className="w-5 h-5" /></div><div><p className="font-bold text-slate-800 text-base">{doc.title}</p><p className="text-xs text-slate-400">{doc.fileName}</p></div></div></td>
+                      <td className="px-8 py-6 text-center">{statusBadge(doc.status)}</td>
+                      <td className="px-8 py-6 text-center"><div className="flex justify-center -space-x-2 space-x-reverse">{(doc.signers||[]).map(s => <div key={s.id} className={`w-9 h-9 rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-white shadow-sm ${s.hasSigned ? 'bg-green-500' : 'bg-slate-300'}`}>{(s.name||'?')[0]}</div>)}</div></td>
+                      <td className="px-8 py-6"><span className="text-sm font-bold text-slate-600">{new Date(doc.createdAt).toLocaleDateString('he-IL')}</span></td>
+                      <td className="px-8 py-6" onClick={e => e.stopPropagation()}><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => onEdit(doc.id)} className="p-2.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-blue-600 hover:text-white transition-all" title="עריכה"><ICONS.Edit className="w-4 h-4" /></button>
                         <button onClick={() => copyLink(doc.id)} className="p-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all" title="העתק לינק"><ICONS.Share className="w-4 h-4" /></button>
                         <button onClick={() => onShare(doc.id)} className="p-2.5 bg-green-50 text-green-600 rounded-xl hover:bg-green-600 hover:text-white transition-all" title="שלח"><ICONS.Phone className="w-4 h-4" /></button>
                         <button onClick={() => onDelete(doc.id)} className="p-2.5 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all" title="מחק"><ICONS.Trash className="w-4 h-4" /></button>
                       </div></td>
                     </tr>
-                  ))}
+                    {expandedId === doc.id && <TimelineRow doc={doc} />}
+                  </React.Fragment>))}
                   {filtered.length === 0 && <tr><td colSpan={5} className="py-24 text-center"><div className="flex flex-col items-center gap-4 text-slate-300"><ICONS.File className="w-16 h-16 opacity-20" /><p className="text-lg font-bold">אין מסמכים</p><p className="text-sm">העלו מסמך PDF להתחלה</p></div></td></tr>}
                 </tbody>
               </table>
@@ -376,21 +367,24 @@
     };
 
     // =============================================
-    // EDITOR VIEW
+    // EDITOR VIEW (with contact picker)
     // =============================================
-    const EditorView = ({ document: initialDoc, loadPdf, onSave, onCancel }) => {
+    const EditorView = ({ document: initialDoc, loadPdf, onSave, onCancel, contacts }) => {
       const [doc, setDoc] = useState(initialDoc);
       const [currentPage, setCurrentPage] = useState(1);
       const [tab, setTab] = useState('signers');
       const [movingId, setMovingId] = useState(null);
       const [pdfB64, setPdfB64] = useState(null);
+      const [showContactPicker, setShowContactPicker] = useState(null);
       const containerRef = useRef(null);
 
       useEffect(() => { if (doc.fileId) loadPdf(doc.fileId).then(setPdfB64); }, [doc.fileId]);
-
       const addSigner = () => setDoc({...doc, signers: [...doc.signers, { id: Math.random().toString(36).substr(2,5), name:'', email:'', phone:'', order: doc.signers.length+1, hasSigned: false }]});
       const addField = (type, label) => setDoc({...doc, fields: [...doc.fields, { id: Math.random().toString(36).substr(2,5), type, label, page: currentPage, x: 50, y: 50, required: true, signerId: doc.signers[0]?.id || '' }]});
-
+      const pickContact = (signerId, contact) => {
+        setDoc({...doc, signers: doc.signers.map(s => s.id === signerId ? {...s, name: contact.firstName + ' ' + (contact.lastName||''), email: contact.email || '', phone: contact.phone || ''} : s)});
+        setShowContactPicker(null);
+      };
       const onMouseMove = (e) => {
         if (!movingId || !containerRef.current) return;
         const rect = containerRef.current.getBoundingClientRect();
@@ -398,14 +392,10 @@
         const y = Math.max(2, Math.min(98, ((e.clientY - rect.top - 44) / (rect.height - 44)) * 100));
         setDoc(prev => ({...prev, fields: prev.fields.map(f => f.id === movingId ? {...f, x, y} : f)}));
       };
-
       const fieldOpts = [
-        { type: 'SIGNATURE', label: 'חתימה', icon: '✍️' },
-        { type: 'INITIALS', label: 'ראשי תיבות', icon: 'א"ב' },
-        { type: 'DATE', label: 'תאריך', icon: '📅' },
-        { type: 'ID_NUMBER', label: 'ת.ז.', icon: '🆔' },
-        { type: 'TEXT', label: 'טקסט', icon: '📝' },
-        { type: 'ADDRESS', label: 'כתובת', icon: '📍' },
+        { type: 'SIGNATURE', label: 'חתימה', icon: '✍️' }, { type: 'INITIALS', label: 'ראשי תיבות', icon: 'א"ב' },
+        { type: 'DATE', label: 'תאריך', icon: '📅' }, { type: 'ID_NUMBER', label: 'ת.ז.', icon: '🆔' },
+        { type: 'TEXT', label: 'טקסט', icon: '📝' }, { type: 'ADDRESS', label: 'כתובת', icon: '📍' },
       ];
 
       return (
@@ -428,7 +418,24 @@
                 {tab === 'signers' ? (<div className="space-y-4">
                   {doc.signers.map((s, i) => (
                     <div key={s.id} className="p-4 bg-slate-50 rounded-2xl border space-y-3">
-                      <div className="flex justify-between items-center"><span className="text-[10px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">חותם {i+1}</span>{doc.signers.length > 1 && <button onClick={() => setDoc({...doc, signers: doc.signers.filter(x => x.id !== s.id)})} className="text-slate-300 hover:text-red-500 text-xs">&times;</button>}</div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">חותם {i+1}</span>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setShowContactPicker(showContactPicker === s.id ? null : s.id)} className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full hover:bg-green-100 flex items-center gap-1"><ICONS.User className="w-3 h-3"/>אנשי קשר</button>
+                          {doc.signers.length > 1 && <button onClick={() => setDoc({...doc, signers: doc.signers.filter(x => x.id !== s.id)})} className="text-slate-300 hover:text-red-500 text-xs">&times;</button>}
+                        </div>
+                      </div>
+                      {showContactPicker === s.id && contacts.length > 0 && (
+                        <div className="bg-white border rounded-xl shadow-lg max-h-40 overflow-y-auto custom-scrollbar">
+                          {contacts.map(c => (
+                            <button key={c.id} onClick={() => pickContact(s.id, c)} className="w-full text-right px-3 py-2.5 hover:bg-blue-50 border-b last:border-b-0 flex items-center gap-2">
+                              <div className="w-7 h-7 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">{(c.firstName||'?')[0]}</div>
+                              <div><p className="text-xs font-bold text-slate-700">{c.firstName} {c.lastName||''}</p><p className="text-[9px] text-slate-400">{c.phone} {c.email?'| '+c.email:''}</p></div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {showContactPicker === s.id && contacts.length === 0 && <p className="text-[10px] text-slate-400 text-center py-2">אין אנשי קשר שמורים</p>}
                       <input type="text" placeholder="שם מלא *" value={s.name} onChange={e => setDoc({...doc, signers: doc.signers.map(x => x.id===s.id?{...x,name:e.target.value}:x)})} className="w-full p-3 border rounded-xl text-xs outline-none focus:border-blue-400 font-bold bg-white" />
                       <input type="email" placeholder="אימייל" value={s.email} onChange={e => setDoc({...doc, signers: doc.signers.map(x => x.id===s.id?{...x,email:e.target.value}:x)})} className="w-full p-3 border rounded-xl text-xs outline-none focus:border-blue-400 font-bold bg-white" dir="ltr" />
                       <input type="tel" placeholder="טלפון" value={s.phone} onChange={e => setDoc({...doc, signers: doc.signers.map(x => x.id===s.id?{...x,phone:e.target.value}:x)})} className="w-full p-3 border rounded-xl text-xs outline-none focus:border-blue-400 font-bold bg-white" dir="ltr" />
@@ -464,26 +471,26 @@
     };
 
     // =============================================
-    // SHARE CENTER
+    // SHARE CENTER (with event tracking)
     // =============================================
     const ShareCenter = ({ document: doc, onClose, showToast }) => {
       const [sendingId, setSendingId] = useState(null);
       const [emailingId, setEmailingId] = useState(null);
       const getLink = (sid) => SCRIPT_URL + '?sign=' + doc.id + '&signer=' + sid;
 
-      const sendWA = (s) => {
+      const sendWA = async (s) => {
         setSendingId(s.id);
         const link = getLink(s.id);
         const text = 'שלום ' + s.name + ',\n\nנא לחתום על "' + doc.title + '".\nהחתימה לוקחת פחות מדקה.\n\nקישור:\n' + link;
-        window.open('https://wa.me/' + s.phone.replace(/\D/g, '') + '?text=' + encodeURIComponent(text), '_blank');
+        window.open('https://wa.me/' + normalizePhone(s.phone) + '?text=' + encodeURIComponent(text), '_blank');
+        try { await gasRun('trackDocumentEvent', doc.id, 'SENT', { method: 'whatsapp', to: s.phone, signerName: s.name }); } catch(e) {}
         setTimeout(() => setSendingId(null), 1000);
       };
-
       const sendMail = async (s) => {
         if (!s.email) { showToast('נא להזין אימייל', 'error'); return; }
         setEmailingId(s.id);
         try {
-          const r = await gasRun('sendSigningEmail', s.email, s.name, doc.title, getLink(s.id));
+          const r = await gasRun('sendSigningEmail', s.email, s.name, doc.title, getLink(s.id), doc.id);
           showToast(r.success ? 'אימייל נשלח ל-' + s.email : 'שגיאה: ' + (r.error || ''), r.success ? 'success' : 'error');
         } catch (e) { showToast('שגיאה בשליחה', 'error'); }
         setEmailingId(null);
@@ -494,7 +501,7 @@
           <div className="bg-white w-full max-w-3xl rounded-[32px] p-10 shadow-2xl animate-slide-up border">
             <div className="flex justify-between items-start mb-8">
               <div><h2 className="text-2xl font-black text-slate-800">מרכז הפצה</h2><p className="text-slate-400 text-sm mt-1">שלח לינק חתימה בדואל, וואטסאפ או העתק קישור</p></div>
-              <button onClick={onClose} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:bg-slate-100">&times;</button>
+              <button onClick={onClose} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:bg-slate-100 text-xl">&times;</button>
             </div>
             <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 mb-6 flex items-center gap-4">
               <div className="bg-blue-600 p-2 rounded-xl text-white"><ICONS.File className="w-5 h-5" /></div>
@@ -523,39 +530,102 @@
     };
 
     // =============================================
-    // CONTACTS VIEW
+    // CONTACTS VIEW (with document history)
     // =============================================
-    const ContactsView = ({ contacts, setContacts }) => {
+    const ContactsView = ({ contacts, setContacts, documents, loadPdf }) => {
       const [showAdd, setShowAdd] = useState(false);
       const [nc, setNc] = useState({ firstName: '', lastName: '', phone: '', email: '' });
+      const [expandedId, setExpandedId] = useState(null);
+      const [viewingPdf, setViewingPdf] = useState(null);
+      const [viewPdfB64, setViewPdfB64] = useState(null);
+      const [viewPage, setViewPage] = useState(1);
+
       const handleAdd = async () => {
         if (!nc.firstName || !nc.phone) return;
         const updated = [...contacts, { ...nc, id: Math.random().toString(36).substr(2,9) }];
-        setContacts(updated);
-        await gasRun('saveAllContacts', updated);
-        setNc({ firstName:'', lastName:'', phone:'', email:'' });
-        setShowAdd(false);
+        setContacts(updated); await gasRun('saveAllContacts', updated);
+        setNc({ firstName:'', lastName:'', phone:'', email:'' }); setShowAdd(false);
       };
-      const handleDelete = async (id) => {
-        const updated = contacts.filter(c => c.id !== id);
-        setContacts(updated);
-        await gasRun('saveAllContacts', updated);
+      const handleDelete = async (id) => { const updated = contacts.filter(c => c.id !== id); setContacts(updated); await gasRun('saveAllContacts', updated); };
+
+      const getContactDocs = (contact) => {
+        return documents.filter(d => (d.signers||[]).some(s => {
+          if (contact.email && s.email && s.email.toLowerCase() === contact.email.toLowerCase()) return true;
+          if (contact.phone && s.phone && s.phone.replace(/\D/g,'') === contact.phone.replace(/\D/g,'')) return true;
+          const fullName = (contact.firstName + ' ' + (contact.lastName||'')).trim();
+          if (fullName && s.name && s.name.trim() === fullName) return true;
+          return false;
+        }));
       };
+
+      const openSignedPdf = async (fileId) => {
+        setViewPdfB64(null); setViewPage(1); setViewingPdf(fileId);
+        const b64 = await loadPdf(fileId);
+        setViewPdfB64(b64);
+      };
+
       return (
         <div className="space-y-8 animate-slide-up">
           <div className="flex justify-between items-end">
             <div><h2 className="text-3xl font-black text-slate-800">אנשי קשר</h2><p className="text-slate-400">ניהול אנשי קשר לשליחה מהירה</p></div>
             <button onClick={() => setShowAdd(true)} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-3 rounded-2xl font-bold shadow-lg flex items-center gap-2 text-sm"><ICONS.Plus className="w-5 h-5" /> הוסף</button>
           </div>
-          <div className="bg-white rounded-[32px] border shadow-sm overflow-hidden">
-            <table className="w-full text-right">
-              <thead className="bg-slate-50 text-[10px] font-bold text-slate-400 uppercase"><tr><th className="px-8 py-6">שם</th><th className="px-8 py-6">טלפון</th><th className="px-8 py-6">אימייל</th><th className="px-8 py-6 text-left">פעולות</th></tr></thead>
-              <tbody className="divide-y">
-                {contacts.map(c => <tr key={c.id} className="hover:bg-slate-50"><td className="px-8 py-6 font-bold text-slate-700">{c.firstName} {c.lastName}</td><td className="px-8 py-6 text-slate-500">{c.phone}</td><td className="px-8 py-6 text-slate-400 text-sm">{c.email||'—'}</td><td className="px-8 py-6 text-left"><button onClick={() => handleDelete(c.id)} className="text-red-300 hover:text-red-500"><ICONS.Trash className="w-5 h-5" /></button></td></tr>)}
-                {contacts.length === 0 && <tr><td colSpan={4} className="py-16 text-center text-slate-300 font-bold">אין אנשי קשר</td></tr>}
-              </tbody>
-            </table>
+
+          <div className="space-y-4">
+            {contacts.map(c => {
+              const cDocs = getContactDocs(c);
+              const isExpanded = expandedId === c.id;
+              return (
+                <div key={c.id} className="bg-white rounded-[24px] border shadow-sm overflow-hidden">
+                  <div className="flex items-center px-8 py-6 cursor-pointer hover:bg-slate-50/50" onClick={() => setExpandedId(isExpanded ? null : c.id)}>
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl flex items-center justify-center text-lg font-black ml-4">{(c.firstName||'?')[0]}</div>
+                    <div className="flex-grow">
+                      <p className="font-black text-slate-800 text-lg">{c.firstName} {c.lastName||''}</p>
+                      <p className="text-sm text-slate-400">{c.phone}{c.email ? ' | ' + c.email : ''}</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      {cDocs.length > 0 && <span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-bold">{cDocs.length} מסמכים</span>}
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} className="text-red-300 hover:text-red-500 p-2"><ICONS.Trash className="w-5 h-5" /></button>
+                      <svg className={`w-5 h-5 text-slate-300 transition-transform ${isExpanded?'rotate-180':''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="px-8 pb-6 border-t bg-slate-50/50">
+                      <p className="text-xs font-black text-slate-400 uppercase py-4">היסטוריית מסמכים</p>
+                      {cDocs.length === 0 ? <p className="text-sm text-slate-300 py-4 text-center">אין מסמכים</p> : (
+                        <div className="space-y-3">
+                          {cDocs.map(d => (
+                            <div key={d.id} className="flex items-center gap-4 p-4 bg-white rounded-2xl border">
+                              <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><ICONS.File className="w-5 h-5" /></div>
+                              <div className="flex-grow">
+                                <p className="font-bold text-slate-800">{d.title}</p>
+                                <p className="text-xs text-slate-400">{fmtDate(d.createdAt)}</p>
+                              </div>
+                              <span className={`px-3 py-1 rounded-full text-xs font-bold ${d.status==='COMPLETED'?'bg-green-50 text-green-600 border border-green-200':d.status==='IN_PROGRESS'?'bg-amber-50 text-amber-600 border border-amber-200':'bg-slate-100 text-slate-500'}`}>{d.status==='COMPLETED'?'נחתם':d.status==='IN_PROGRESS'?'ממתין':'טיוטה'}</span>
+                              {d.status === 'COMPLETED' && d.signedFileId && (
+                                <button onClick={() => openSignedPdf(d.signedFileId)} className="p-2.5 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 flex items-center gap-1 text-xs font-bold"><ICONS.Eye className="w-4 h-4"/>צפייה</button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {contacts.length === 0 && <div className="bg-white rounded-[32px] border shadow-sm py-16 text-center text-slate-300 font-bold">אין אנשי קשר</div>}
           </div>
+
+          {viewingPdf && (
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-3xl rounded-[32px] p-8 shadow-2xl animate-slide-up border max-h-[90vh] overflow-auto">
+                <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-800">צפייה במסמך חתום</h3><button onClick={() => setViewingPdf(null)} className="p-2 text-slate-400 hover:text-slate-600 text-2xl">&times;</button></div>
+                {viewPdfB64 ? <PDFViewer pdfBase64={viewPdfB64} currentPage={viewPage} onPageChange={setViewPage} /> : <Loader message="טוען מסמך..." />}
+              </div>
+            </div>
+          )}
+
           {showAdd && <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-md rounded-[32px] p-10 space-y-5 shadow-2xl border animate-slide-up">
               <h3 className="text-xl font-black text-slate-800">איש קשר חדש</h3>
@@ -573,7 +643,189 @@
     };
 
     // =============================================
-    // SIGNER PROCESS (Client signing page)
+    // CERTIFICATE PAGE GENERATOR
+    // =============================================
+    const drawCertificatePage = async (docTitle, signerName, signerEmail, auditInfo) => {
+      const W = 1190, H = 1684;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+
+      // Background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+
+      // Decorative border
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(40, 40, W-80, H-80);
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(52, 52, W-104, H-104);
+
+      // Header gradient bar
+      const grad = ctx.createLinearGradient(80, 80, W-80, 200);
+      grad.addColorStop(0, '#2563eb');
+      grad.addColorStop(1, '#1d4ed8');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(80, 80, W-160, 140, 20);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 48px Assistant, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('SignSmart', W/2, 160);
+      ctx.font = '24px Assistant, Arial, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.fillText('Digital Signature Certificate', W/2, 200);
+
+      // Title
+      ctx.fillStyle = '#1e293b';
+      ctx.font = 'bold 44px Assistant, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.direction = 'rtl';
+      ctx.fillText('אישור חתימה דיגיטלית', W/2, 320);
+
+      // Divider
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(200, 360); ctx.lineTo(W-200, 360); ctx.stroke();
+
+      // Document details section
+      const drawRow = (label, value, y) => {
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'bold 26px Assistant, Arial, sans-serif';
+        ctx.fillText(label, W - 120, y);
+        ctx.fillStyle = '#1e293b';
+        ctx.font = '26px Assistant, Arial, sans-serif';
+        ctx.fillText(value || '---', W - 340, y);
+      };
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath(); ctx.roundRect(100, 390, W-200, 160, 16); ctx.fill();
+      ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(100, 390, W-200, 160, 16); ctx.stroke();
+
+      drawRow('שם המסמך:', docTitle, 440);
+      drawRow('שם החותם:', signerName, 480);
+      drawRow('דוא"ל:', signerEmail || '---', 520);
+
+      // Timeline section
+      ctx.fillStyle = '#1e293b';
+      ctx.font = 'bold 30px Assistant, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ציר זמן', W/2, 620);
+
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.beginPath(); ctx.moveTo(300, 640); ctx.lineTo(W-300, 640); ctx.stroke();
+
+      const timelineItems = [
+        { label: 'נשלח למייל / וואטסאפ', time: auditInfo.sentAt, color: '#8b5cf6' },
+        { label: 'הלינק נפתח', time: auditInfo.linkOpenedAt, color: '#f59e0b' },
+        { label: 'המסמך נקרא', time: auditInfo.pdfViewedAt, color: '#3b82f6' },
+        { label: 'נחתם דיגיטלית', time: auditInfo.signedAt, color: '#22c55e' },
+      ];
+
+      timelineItems.forEach((item, i) => {
+        const y = 690 + i * 70;
+        // Circle
+        ctx.fillStyle = item.color;
+        ctx.beginPath(); ctx.arc(W - 160, y, 16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+        ctx.fillText(String(i + 1), W - 160, y + 6);
+        // Line between circles
+        if (i < timelineItems.length - 1) {
+          ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(W - 160, y + 16); ctx.lineTo(W - 160, y + 54); ctx.stroke();
+        }
+        // Label
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 24px Assistant, Arial, sans-serif';
+        ctx.fillText(item.label, W - 200, y + 8);
+        // Time
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '22px Assistant, Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(item.time || '---', 120, y + 8);
+      });
+
+      // Device info section
+      ctx.fillStyle = '#1e293b';
+      ctx.font = 'bold 30px Assistant, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('פרטי מכשיר', W/2, 1010);
+
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.beginPath(); ctx.moveTo(300, 1030); ctx.lineTo(W-300, 1030); ctx.stroke();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath(); ctx.roundRect(100, 1050, W-200, 200, 16); ctx.fill();
+      ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(100, 1050, W-200, 200, 16); ctx.stroke();
+
+      drawRow('מכשיר:', auditInfo.device, 1100);
+      drawRow('דפדפן:', auditInfo.browser, 1140);
+      drawRow('מערכת הפעלה:', auditInfo.os, 1180);
+      drawRow('רזולוציית מסך:', auditInfo.screenRes, 1220);
+
+      // STAMP
+      const stampX = 300, stampY = 1420, stampR = 100;
+      ctx.save();
+      ctx.translate(stampX, stampY);
+      ctx.rotate(-0.15);
+
+      // Outer ring
+      ctx.strokeStyle = '#1e40af';
+      ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(0, 0, stampR, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, stampR - 12, 0, Math.PI * 2); ctx.stroke();
+
+      // Text around stamp
+      ctx.fillStyle = '#1e40af';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      const stampText = 'SIGNSMART  VERIFIED  SIGNSMART  VERIFIED';
+      for (let i = 0; i < stampText.length; i++) {
+        ctx.save();
+        ctx.rotate(i * (Math.PI * 2) / stampText.length - Math.PI / 2);
+        ctx.translate(0, -(stampR - 28));
+        ctx.fillText(stampText[i], 0, 0);
+        ctx.restore();
+      }
+
+      // Center checkmark
+      ctx.fillStyle = '#1e40af';
+      ctx.font = 'bold 50px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('✓', 0, 18);
+
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText('DIGITAL', 0, 45);
+
+      ctx.restore();
+
+      // Signing reference ID
+      const sigRef = 'SIG-' + auditInfo.signingId;
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '20px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Signing Reference: ' + sigRef, W/2, 1560);
+
+      // Footer
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '18px Assistant, Arial, sans-serif';
+      ctx.fillText('מסמך זה הופק אוטומטית על ידי מערכת SignSmart ומהווה אישור חתימה דיגיטלית', W/2, 1610);
+
+      return canvas;
+    };
+
+    // =============================================
+    // SIGNER PROCESS (with device tracking + certificate)
     // =============================================
     const SignerProcess = ({ document: doc, loadPdf, onComplete, showToast }) => {
       const [step, setStep] = useState(0);
@@ -584,11 +836,16 @@
       const [isCompleted, setIsCompleted] = useState(false);
       const [currentPage, setCurrentPage] = useState(1);
       const [pdfB64, setPdfB64] = useState(null);
+      const linkOpenedAt = useRef(new Date().toISOString());
+      const pdfViewedAt = useRef(null);
 
       const fields = doc.fields || [];
       const cf = fields[step];
 
-      useEffect(() => { if (doc.fileId) loadPdf(doc.fileId).then(setPdfB64); }, [doc.fileId]);
+      useEffect(() => {
+        if (doc.fileId) loadPdf(doc.fileId).then(b64 => { setPdfB64(b64); pdfViewedAt.current = new Date().toISOString(); });
+        gasRun('trackDocumentEvent', doc.id, 'OPENED', { userAgent: navigator.userAgent }).catch(() => {});
+      }, [doc.fileId]);
 
       const handleSig = (dataUrl) => {
         if (!cf) return;
@@ -600,13 +857,31 @@
 
       const handleFinish = async () => {
         setIsFinishing(true);
+        const signedAtTime = new Date().toISOString();
+        const uaInfo = parseUA(navigator.userAgent);
+        const signingId = Math.random().toString(36).substr(2, 12);
+        const signerName = (doc.signers && doc.signers[0]) ? doc.signers[0].name : 'לקוח';
+        const signerEmail = (doc.signers && doc.signers[0]) ? doc.signers[0].email : '';
+
+        const auditInfo = {
+          signingId,
+          device: uaInfo.device,
+          browser: uaInfo.browser,
+          os: uaInfo.os,
+          screenRes: screen.width + ' x ' + screen.height,
+          userAgent: navigator.userAgent,
+          sentAt: fmtDate(doc.sentAt),
+          linkOpenedAt: fmtDate(linkOpenedAt.current),
+          pdfViewedAt: fmtDate(pdfViewedAt.current),
+          signedAt: fmtDate(signedAtTime),
+        };
+
         try {
-          // Use pdf-lib on client to embed signatures
-          const raw = atob(pdfB64);
-          const arr = new Uint8Array(raw.length);
+          const raw = atob(pdfB64); const arr = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
           const pdfDoc = await PDFLib.PDFDocument.load(arr);
 
+          // Embed signatures
           for (const f of fields) {
             if ((f.type === 'SIGNATURE' || f.type === 'INITIALS') && sigDataUrls[f.id]) {
               try {
@@ -624,11 +899,21 @@
             }
           }
 
+          // Generate certificate page
+          try {
+            const certCanvas = await drawCertificatePage(doc.title, signerName, signerEmail, auditInfo);
+            const certDataUrl = certCanvas.toDataURL('image/png');
+            const certB64 = certDataUrl.split(',')[1];
+            const certBytes = Uint8Array.from(atob(certB64), c => c.charCodeAt(0));
+            const certImg = await pdfDoc.embedPng(certBytes);
+            const certPage = pdfDoc.addPage([595.28, 841.89]);
+            certPage.drawImage(certImg, { x: 0, y: 0, width: 595.28, height: 841.89 });
+          } catch (certErr) { console.error('Certificate page error:', certErr); }
+
           const signedBytes = await pdfDoc.save();
           const signedB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(signedBytes)));
-          const signerName = (doc.signers && doc.signers[0]) ? doc.signers[0].name : 'לקוח';
 
-          await gasRun('saveSignedDocument', signedB64, doc.id, signerName);
+          await gasRun('saveSignedDocument', signedB64, doc.id, signerName, auditInfo);
           showToast('המסמך נחתם בהצלחה! עותק נשלח למשרד.');
         } catch (err) {
           console.error('Signing error:', err);
@@ -644,7 +929,7 @@
             <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto shadow-lg"><ICONS.Check className="w-12 h-12" /></div>
             <h2 className="text-3xl font-black text-slate-800">החתימה הושלמה!</h2>
             <p className="text-slate-500 text-lg">המסמך "<strong>{doc.title}</strong>" נחתם ונשלח למשרד.</p>
-            <p className="text-slate-400 text-sm">עותק חתום נשלח ל: peri@bettylaw.co.il</p>
+            <p className="text-slate-400 text-sm">עותק חתום כולל אישור חתימה נשלח ל: peri@bettylaw.co.il</p>
             <div className="bg-green-50 border border-green-100 rounded-2xl p-6 inline-block"><p className="text-green-700 font-bold text-sm">תודה! ניתן לסגור עמוד זה.</p></div>
           </div>
         );
@@ -654,7 +939,6 @@
         <div className="flex flex-col gap-6 animate-slide-up max-w-5xl mx-auto">
           {isFinishing && <div className="fixed inset-0 bg-white/90 backdrop-blur-md z-[200] flex flex-col items-center justify-center"><Loader message="מעבד חתימה ושולח למשרד..." /></div>}
           {showSignPad && <SignaturePad onSave={handleSig} onCancel={() => setShowSignPad(false)} />}
-
           <div className="bg-white p-8 rounded-[32px] border shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex items-center gap-5">
               <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-3 rounded-2xl text-white shadow-lg shadow-blue-200"><ICONS.Logo className="w-8 h-8" /></div>
@@ -665,7 +949,6 @@
               <div className="w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all" style={{width:`${((step+1)/Math.max(fields.length,1))*100}%`}}></div></div>
             </div>}
           </div>
-
           <div className="flex flex-col lg:flex-row gap-8">
             <div className="flex-grow bg-slate-200/30 p-6 rounded-[32px] border shadow-inner flex justify-center overflow-auto min-h-[65vh]">
               <div className="w-full max-w-[620px] relative">
@@ -682,7 +965,6 @@
                 </PDFViewer> : <Loader message="טוען מסמך..." />}
               </div>
             </div>
-
             {fields.length > 0 && <div className="w-full lg:w-80 flex flex-col gap-6">
               <div className="bg-white p-8 rounded-[32px] border shadow-sm space-y-6">
                 <h3 className="font-black text-slate-800">פעולה נדרשת</h3>
