@@ -651,6 +651,25 @@
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d');
 
+      // Polyfill roundRect for older browsers (iOS Safari < 16)
+      if (!ctx.roundRect) {
+        ctx.roundRect = function(x, y, w, h, r) {
+          if (typeof r === 'number') r = [r, r, r, r];
+          const [tl, tr, br, bl] = r;
+          this.beginPath();
+          this.moveTo(x + tl, y);
+          this.lineTo(x + w - tr, y);
+          this.quadraticCurveTo(x + w, y, x + w, y + tr);
+          this.lineTo(x + w, y + h - br);
+          this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+          this.lineTo(x + bl, y + h);
+          this.quadraticCurveTo(x, y + h, x, y + h - bl);
+          this.lineTo(x, y + tl);
+          this.quadraticCurveTo(x, y, x + tl, y);
+          this.closePath();
+        };
+      }
+
       // Background
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, W, H);
@@ -911,16 +930,22 @@
           } catch (certErr) { console.error('Certificate page error:', certErr); }
 
           const signedBytes = await pdfDoc.save();
-          const signedB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(signedBytes)));
+          const bytes = new Uint8Array(signedBytes);
+          let binary = '';
+          const chunk = 8192;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+          }
+          const signedB64 = btoa(binary);
 
           await gasRun('saveSignedDocument', signedB64, doc.id, signerName, auditInfo);
           showToast('המסמך נחתם בהצלחה! עותק נשלח למשרד.');
+          setIsCompleted(true);
         } catch (err) {
           console.error('Signing error:', err);
-          showToast('שגיאה בחתימה', 'error');
+          showToast('שגיאה בחתימה: ' + (err.message || err), 'error');
         }
         setIsFinishing(false);
-        setIsCompleted(true);
       };
 
       if (isCompleted) {
