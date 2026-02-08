@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SignSmart | מערכת חתימה דיגיטלית</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <!-- React 18 UMD -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel standalone for JSX -->
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <!-- PDF.js v3 UMD -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- pdf-lib UMD -->
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <style>
+    body { font-family: 'Assistant', sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    @keyframes slideInUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .animate-slide-up { animation: slideInUp 0.4s ease-out forwards; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Template variables from Apps Script -->
+  <script>
+    var SCRIPT_URL = '<?= scriptUrl ?>';
+    var INITIAL_SIGN_ID = '<?= signId ?>';
+    var INITIAL_SIGNER_ID = '<?= signerId ?>';
+
+    // Setup PDF.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    // Apps Script RPC wrapper
+    function gasRun(fn) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      return new Promise(function(resolve, reject) {
+        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+        runner[fn].apply(runner, args);
+      });
+    }
+
+    // Safe base64 decode to Uint8Array (avoids atob size limits)
+    function safeBase64ToUint8Array(b64) {
+      var raw = atob(b64);
+      var len = raw.length;
+      var arr = new Uint8Array(len);
+      for (var i = 0; i < len; i++) {
+        arr[i] = raw.charCodeAt(i);
+      }
+      return arr;
+    }
+
+    // Safe Uint8Array to base64 (avoids String.fromCharCode.apply stack overflow)
+    function safeUint8ArrayToBase64(uint8Array) {
+      var binary = '';
+      var chunkSize = 8192;
+      for (var i = 0; i < uint8Array.length; i += chunkSize) {
+        var chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+        binary += String.fromCharCode.apply(null, chunk);
+      }
+      return btoa(binary);
+    }
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // =============================================
+    // SVG ICONS
+    // =============================================
+    const ICONS = {
+      Logo: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22V12"/><path d="M12 12 7.5 7.5"/><path d="M12 12l4.5-4.5"/><path d="M21 16v5h-5"/><path d="M3 16v5h5"/></svg>,
+      Home: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+      Plus: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+      Share: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>,
+      Check: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>,
+      Mail: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>,
+      Phone: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
+      Alert: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
+      File: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14.5 2 14.5 7.5 20 7.5"/></svg>,
+      Trash: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
+      Edit: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+      Dash: (p) => <svg {...p} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>,
+    };
+
+    // =============================================
+    // UTILITY COMPONENTS
+    // =============================================
+    const Loader = ({ message = "טוען..." }) => (
+      <div className="flex flex-col items-center justify-center p-12 space-y-4">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-500 font-bold animate-pulse">{message}</p>
+      </div>
+    );
+
+    const Toast = ({ message, type = 'success', onClose }) => {
+      useEffect(() => { const t = setTimeout(onClose, 4000); return () => clearTimeout(t); }, []);
+      const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-blue-500' };
+      return (
+        <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-[300] ${colors[type]} text-white px-8 py-4 rounded-2xl shadow-2xl font-bold text-sm animate-slide-up flex items-center gap-3`}>
+          {type === 'success' && <ICONS.Check className="w-5 h-5" />}
+          {type === 'error' && <ICONS.Alert className="w-5 h-5" />}
+          {message}
+          <button onClick={onClose} className="mr-3 opacity-70 hover:opacity-100">&times;</button>
+        </div>
+      );
+    };
+
+    // =============================================
+    // SIGNATURE PAD
+    // =============================================
+    const SignaturePad = ({ onSave, onCancel }) => {
+      const canvasRef = useRef(null);
+      const [isDrawing, setIsDrawing] = useState(false);
+      const [hasContent, setHasContent] = useState(false);
+      const lastPos = useRef(null);
+
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.offsetWidth * 2;
+        canvas.height = canvas.offsetHeight * 2;
+        ctx.scale(2, 2);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = '#1e293b';
+      }, []);
+
+      const getPos = (e) => {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches ? (e.touches[0] || e.changedTouches[0]) : null;
+        const cX = touch ? touch.clientX : e.clientX;
+        const cY = touch ? touch.clientY : e.clientY;
+        return { x: cX - rect.left, y: cY - rect.top };
+      };
+      const startDraw = (e) => { e.preventDefault(); setIsDrawing(true); lastPos.current = getPos(e); setHasContent(true); };
+      const draw = (e) => {
+        if (!isDrawing || !lastPos.current) return;
+        e.preventDefault();
+        const ctx = canvasRef.current.getContext('2d');
+        const pos = getPos(e);
+        ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(pos.x, pos.y); ctx.stroke();
+        lastPos.current = pos;
+      };
+      const stopDraw = () => { setIsDrawing(false); lastPos.current = null; };
+      const clearCanvas = () => { const c = canvasRef.current; c.getContext('2d').clearRect(0, 0, c.width, c.height); setHasContent(false); };
+      const save = () => { if (canvasRef.current && hasContent) onSave(canvasRef.current.toDataURL('image/png')); };
+
+      return (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-[32px] p-8 shadow-2xl animate-slide-up border space-y-6">
+            <div className="flex justify-between items-center"><h3 className="text-xl font-black text-slate-800">חתימה דיגיטלית</h3><button onClick={onCancel} className="p-2 text-slate-400 hover:text-slate-600">&times;</button></div>
+            <p className="text-sm text-slate-400 font-medium">חתמו באצבע או בעזרת העכבר</p>
+            <div className="relative border-2 border-dashed border-slate-200 rounded-2xl overflow-hidden bg-white">
+              <canvas ref={canvasRef} className="w-full cursor-crosshair" style={{height:'200px',touchAction:'none'}}
+                onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw}
+                onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw} />
+              {!hasContent && <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><p className="text-slate-200 font-bold text-lg">חתמו כאן</p></div>}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={clearCanvas} className="flex-1 py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl hover:bg-slate-200">נקה</button>
+              <button onClick={save} disabled={!hasContent} className={`flex-1 py-4 font-bold rounded-2xl ${hasContent ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>אשר חתימה</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // PDF VIEWER (renders PDF from base64)
+    // =============================================
+    const PDFViewer = ({ pdfBase64, currentPage = 1, onPageChange, children }) => {
+      const containerRef = useRef(null);
+      const [loading, setLoading] = useState(true);
+      const [numPages, setNumPages] = useState(1);
+
+      useEffect(() => {
+        let mounted = true;
+        (async () => {
+          if (!pdfBase64) return;
+          setLoading(true);
+          try {
+            const arr = safeBase64ToUint8Array(pdfBase64);
+            const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
+            if (mounted) setNumPages(pdf.numPages);
+            const pageNum = Math.min(currentPage, pdf.numPages);
+            const page = await pdf.getPage(pageNum);
+            const vp = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.height = vp.height; canvas.width = vp.width;
+            await page.render({ canvasContext: ctx, viewport: vp }).promise;
+            if (mounted && containerRef.current) {
+              containerRef.current.innerHTML = '';
+              containerRef.current.appendChild(canvas);
+              canvas.className = "w-full shadow-lg rounded-lg";
+              setLoading(false);
+            }
+          } catch (err) { console.error('PDF render error:', err); if (mounted) setLoading(false); }
+        })();
+        return () => { mounted = false; };
+      }, [pdfBase64, currentPage]);
+
+      return (
+        <div className="relative w-full flex flex-col items-center">
+          {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-50 rounded-xl font-bold text-blue-600">טוען עמוד {currentPage}...</div>}
+          <div className="w-full flex justify-between items-center mb-4 bg-slate-800 text-white px-4 py-2 rounded-xl shadow-lg z-20">
+            <button disabled={currentPage <= 1} onClick={() => onPageChange && onPageChange(currentPage - 1)} className="p-1 hover:bg-slate-700 rounded-lg disabled:opacity-30"><svg className="w-5 h-5 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg></button>
+            <span className="text-xs font-bold">עמוד {currentPage} מתוך {numPages}</span>
+            <button disabled={currentPage >= numPages} onClick={() => onPageChange && onPageChange(currentPage + 1)} className="p-1 hover:bg-slate-700 rounded-lg disabled:opacity-30"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg></button>
+          </div>
+          <div ref={containerRef} className="relative z-0 w-full overflow-hidden bg-white border rounded-lg shadow-sm"></div>
+          {!loading && <div className="absolute inset-0 z-10 pointer-events-none mt-[44px]">{children}</div>}
+        </div>
+      );
+    };
+
+    // =============================================
+    // MAIN APP
+    // =============================================
+    const App = () => {
+      const [view, setView] = useState('home');
+      const [documents, setDocuments] = useState([]);
+      const [contacts, setContacts] = useState([]);
+      const [selectedId, setSelectedId] = useState(null);
+      const [isLoading, setIsLoading] = useState(true);
+      const [toast, setToast] = useState(null);
+      const [pdfCache, setPdfCache] = useState({});
+
+      const showToast = (message, type) => setToast({ message, type: type || 'success' });
+
+      const loadPdf = async (fileId) => {
+        if (pdfCache[fileId]) return pdfCache[fileId];
+        const b64 = await gasRun('getFileBase64', fileId);
+        if (b64) {
+          setPdfCache(prev => ({ ...prev, [fileId]: b64 }));
+        }
+        return b64;
+      };
+
+      useEffect(() => {
+        (async () => {
+          try {
+            if (INITIAL_SIGN_ID) {
+              const doc = await gasRun('getDocument', INITIAL_SIGN_ID);
+              if (doc) { setDocuments([doc]); setSelectedId(INITIAL_SIGN_ID); setView('signing'); }
+            } else {
+              const [docs, cts] = await Promise.all([gasRun('getAllDocuments'), gasRun('getAllContacts')]);
+              setDocuments(docs || []);
+              setContacts(cts || []);
+            }
+          } catch (e) { console.error('Init error:', e); }
+          setIsLoading(false);
+        })();
+      }, []);
+
+      const handleFileUpload = async (file) => {
+        if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
+          showToast('נא להעלות קובץ PDF בלבד', 'error');
+          return;
+        }
+        setIsLoading(true);
+        try {
+          const reader = new FileReader();
+          const b64 = await new Promise((res, rej) => { reader.onload = () => res(reader.result.split(',')[1]); reader.onerror = rej; reader.readAsDataURL(file); });
+          const result = await gasRun('uploadFile', b64, file.name);
+          const newDoc = {
+            id: Math.random().toString(36).substr(2, 9),
+            title: file.name.replace(/\.pdf$/i, ''),
+            fileName: file.name,
+            fileId: result.fileId,
+            status: 'PENDING',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            signers: [{ id: 's1', name: '', email: '', phone: '', order: 1, hasSigned: false }],
+            fields: [],
+            signingOrder: 'SEQUENTIAL',
+            remindersEnabled: true
+          };
+          await gasRun('saveDocument', newDoc);
+          setDocuments(prev => [newDoc, ...prev]);
+          setSelectedId(newDoc.id);
+          setView('editor');
+          showToast('הקובץ הועלה בהצלחה!');
+        } catch (err) { console.error(err); showToast('שגיאה בהעלאה', 'error'); }
+        setIsLoading(false);
+      };
+
+      const handleSaveDoc = async (d) => {
+        const updated = { ...d, status: 'IN_PROGRESS', updatedAt: new Date().toISOString() };
+        setDocuments(docs => docs.map(doc => doc.id === updated.id ? updated : doc));
+        await gasRun('saveDocument', updated);
+        setSelectedId(d.id);
+        setView('share');
+        showToast('המסמך נשמר!');
+      };
+
+      const handleDeleteDoc = async (id) => {
+        setDocuments(docs => docs.filter(d => d.id !== id));
+        await gasRun('deleteDocument', id);
+        showToast('המסמך נמחק');
+      };
+
+      const currentDoc = documents.find(d => d.id === selectedId);
+
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col font-sans" dir="rtl">
+          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+          {view !== 'signing' && (
+            <header className="bg-white/90 backdrop-blur-md border-b border-slate-100 h-20 flex items-center justify-between sticky top-0 z-50 px-6 md:px-12 shadow-sm">
+              <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setView('home'); setSelectedId(null); }}>
+                <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-2.5 rounded-2xl text-white shadow-lg shadow-blue-200"><ICONS.Logo className="w-6 h-6" /></div>
+                <div><h1 className="text-xl font-black text-slate-800 tracking-tight">SignSmart</h1><p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">מערכת חתימה דיגיטלית</p></div>
+              </div>
+              <nav className="flex items-center gap-2">
+                <button onClick={() => setView('home')} className={`p-2 rounded-xl font-bold flex items-center gap-2 text-sm ${view === 'home' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><ICONS.Home className="w-5 h-5" /> בית</button>
+                <button onClick={() => setView('contacts')} className={`px-4 py-2 rounded-xl font-bold text-sm ${view === 'contacts' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>אנשי קשר</button>
+                <div className="h-8 w-px bg-slate-100 mx-2"></div>
+                <label className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-2.5 rounded-2xl font-bold cursor-pointer shadow-lg shadow-blue-200 flex items-center gap-2 text-sm">
+                  <ICONS.Plus className="w-4 h-4" /> העלאת מסמך
+                  <input type="file" className="hidden" accept=".pdf" onChange={(e) => { if (e.target.files[0]) handleFileUpload(e.target.files[0]); e.target.value = ''; }} />
+                </label>
+              </nav>
+            </header>
+          )}
+
+          <main className="flex-grow container mx-auto px-4 md:px-12 py-10">
+            {isLoading ? <Loader message="טוען את המערכת..." /> : (<>
+              {(view === 'home' || view === 'dashboard') && <HomeDashboard documents={documents} onEdit={(id) => { setSelectedId(id); setView('editor'); }} onDelete={handleDeleteDoc} onShare={(id) => { setSelectedId(id); setView('share'); }} onUpload={handleFileUpload} />}
+              {view === 'contacts' && <ContactsView contacts={contacts} setContacts={setContacts} />}
+              {view === 'editor' && currentDoc && <EditorView document={currentDoc} loadPdf={loadPdf} onSave={handleSaveDoc} onCancel={() => setView('home')} />}
+              {view === 'share' && currentDoc && <ShareCenter document={currentDoc} onClose={() => setView('home')} showToast={showToast} />}
+              {view === 'signing' && currentDoc && <SignerProcess document={currentDoc} signerId={INITIAL_SIGNER_ID} loadPdf={loadPdf} onComplete={() => setView('home')} showToast={showToast} />}
+            </>)}
+          </main>
+        </div>
+      );
+    };
+
+    // =============================================
+    // HOME DASHBOARD
+    // =============================================
+    const HomeDashboard = ({ documents, onEdit, onDelete, onShare, onUpload }) => {
+      const [search, setSearch] = useState('');
+      const filtered = documents.filter(d => (d.title || '').toLowerCase().includes(search.toLowerCase()));
+      const copyLink = (id) => { navigator.clipboard.writeText(SCRIPT_URL + '?sign=' + id); };
+      const badge = (status) => {
+        const s = { PENDING:'bg-slate-100 text-slate-600', IN_PROGRESS:'bg-amber-50 text-amber-600 border border-amber-100', COMPLETED:'bg-green-50 text-green-600 border border-green-100', EXPIRED:'bg-red-50 text-red-600' };
+        const l = { PENDING:'טיוטה', IN_PROGRESS:'ממתין לחתימה', COMPLETED:'נחתם', EXPIRED:'פג תוקף' };
+        return <span className={`px-3 py-1 rounded-full text-[10px] font-black ${s[status] || s.PENDING}`}>{l[status] || status}</span>;
+      };
+      return (
+        <div className="space-y-10 animate-slide-up">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="bg-white p-8 rounded-[32px] border shadow-sm flex flex-col items-center gap-2"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">סה"כ מסמכים</p><p className="text-4xl font-black text-slate-800">{documents.length}</p></div>
+            <div className="bg-white p-8 rounded-[32px] border shadow-sm flex flex-col items-center gap-2"><p className="text-[10px] font-black text-amber-400 uppercase tracking-widest">ממתינים</p><p className="text-4xl font-black text-amber-600">{documents.filter(d => d.status === 'IN_PROGRESS').length}</p></div>
+            <div className="bg-white p-8 rounded-[32px] border shadow-sm flex flex-col items-center gap-2"><p className="text-[10px] font-black text-green-400 uppercase tracking-widest">הושלמו</p><p className="text-4xl font-black text-green-600">{documents.filter(d => d.status === 'COMPLETED').length}</p></div>
+            <label className="bg-gradient-to-br from-blue-600 to-blue-700 p-8 rounded-[32px] shadow-lg shadow-blue-200 flex flex-col items-center gap-3 cursor-pointer text-white"><ICONS.Plus className="w-8 h-8" /><p className="font-black text-sm">העלאת מסמך חדש</p><input type="file" className="hidden" accept=".pdf" onChange={(e) => { if (e.target.files[0]) onUpload(e.target.files[0]); e.target.value = ''; }} /></label>
+          </div>
+          <div className="bg-white rounded-[32px] shadow-sm border overflow-hidden">
+            <div className="p-8 border-b bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="flex items-center gap-4"><div className="bg-blue-600 p-2.5 rounded-2xl text-white"><ICONS.Dash className="w-5 h-5" /></div><h3 className="text-lg font-black text-slate-800">ניהול מסמכים</h3></div>
+              <div className="relative w-full md:w-80">
+                <input type="text" placeholder="חיפוש..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-12 pr-6 py-3 bg-white border rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-50" />
+                <svg className="absolute left-4 top-3 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-right">
+                <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest"><tr><th className="px-8 py-5">מסמך</th><th className="px-8 py-5 text-center">סטטוס</th><th className="px-8 py-5 text-center">חותמים</th><th className="px-8 py-5">תאריך</th><th className="px-8 py-5 text-left">פעולות</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filtered.map(doc => (
+                    <tr key={doc.id} className="hover:bg-blue-50/30 group">
+                      <td className="px-8 py-6"><div className="flex items-center gap-4"><div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><ICONS.File className="w-5 h-5" /></div><div><p className="font-bold text-slate-800">{doc.title}</p><p className="text-[10px] text-slate-400">{doc.fileName}</p></div></div></td>
+                      <td className="px-8 py-6 text-center">{badge(doc.status)}</td>
+                      <td className="px-8 py-6 text-center"><div className="flex justify-center -space-x-2 space-x-reverse">{(doc.signers||[]).map(s => <div key={s.id} className={`w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-bold text-white shadow-sm ${s.hasSigned ? 'bg-green-500' : 'bg-slate-300'}`}>{(s.name||'?')[0]}</div>)}</div></td>
+                      <td className="px-8 py-6"><span className="text-sm text-slate-500">{new Date(doc.createdAt).toLocaleDateString('he-IL')}</span></td>
+                      <td className="px-8 py-6"><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => onEdit(doc.id)} className="p-2.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-blue-600 hover:text-white transition-all" title="עריכה"><ICONS.Edit className="w-4 h-4" /></button>
+                        <button onClick={() => copyLink(doc.id)} className="p-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all" title="העתק לינק"><ICONS.Share className="w-4 h-4" /></button>
+                        <button onClick={() => onShare(doc.id)} className="p-2.5 bg-green-50 text-green-600 rounded-xl hover:bg-green-600 hover:text-white transition-all" title="שלח"><ICONS.Phone className="w-4 h-4" /></button>
+                        <button onClick={() => onDelete(doc.id)} className="p-2.5 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all" title="מחק"><ICONS.Trash className="w-4 h-4" /></button>
+                      </div></td>
+                    </tr>
+                  ))}
+                  {filtered.length === 0 && <tr><td colSpan={5} className="py-24 text-center"><div className="flex flex-col items-center gap-4 text-slate-300"><ICONS.File className="w-16 h-16 opacity-20" /><p className="text-lg font-bold">אין מסמכים</p><p className="text-sm">העלו מסמך PDF להתחלה</p></div></td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // EDITOR VIEW
+    // =============================================
+    const EditorView = ({ document: initialDoc, loadPdf, onSave, onCancel }) => {
+      const [doc, setDoc] = useState(initialDoc);
+      const [currentPage, setCurrentPage] = useState(1);
+      const [tab, setTab] = useState('signers');
+      const [movingId, setMovingId] = useState(null);
+      const [pdfB64, setPdfB64] = useState(null);
+      const containerRef = useRef(null);
+
+      useEffect(() => { if (doc.fileId) loadPdf(doc.fileId).then(setPdfB64); }, [doc.fileId]);
+
+      const addSigner = () => setDoc({...doc, signers: [...doc.signers, { id: Math.random().toString(36).substr(2,5), name:'', email:'', phone:'', order: doc.signers.length+1, hasSigned: false }]});
+      const addField = (type, label) => setDoc({...doc, fields: [...doc.fields, { id: Math.random().toString(36).substr(2,5), type, label, page: currentPage, x: 50, y: 50, required: true, signerId: doc.signers[0]?.id || '' }]});
+
+      const onMouseMove = (e) => {
+        if (!movingId || !containerRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const x = Math.max(2, Math.min(98, ((e.clientX - rect.left) / rect.width) * 100));
+        const y = Math.max(2, Math.min(98, ((e.clientY - rect.top - 44) / (rect.height - 44)) * 100));
+        setDoc(prev => ({...prev, fields: prev.fields.map(f => f.id === movingId ? {...f, x, y} : f)}));
+      };
+
+      const fieldOpts = [
+        { type: 'SIGNATURE', label: 'חתימה', icon: '✍️' },
+        { type: 'INITIALS', label: 'ראשי תיבות', icon: 'א"ב' },
+        { type: 'DATE', label: 'תאריך', icon: '📅' },
+        { type: 'ID_NUMBER', label: 'ת.ז.', icon: '🆔' },
+        { type: 'TEXT', label: 'טקסט', icon: '📝' },
+        { type: 'ADDRESS', label: 'כתובת', icon: '📍' },
+      ];
+
+      return (
+        <div className="flex flex-col h-[82vh] bg-white rounded-[32px] shadow-2xl overflow-hidden border" onMouseMove={onMouseMove} onMouseUp={() => setMovingId(null)}>
+          <div className="p-6 border-b flex justify-between items-center bg-white">
+            <div className="flex items-center gap-4">
+              <button onClick={onCancel} className="text-slate-400 font-bold hover:text-slate-800 text-sm">← חזרה</button>
+              <div className="h-6 w-px bg-slate-200"></div>
+              <input type="text" value={doc.title} onChange={e => setDoc({...doc, title: e.target.value})} className="text-xl font-bold text-slate-800 bg-transparent outline-none border-b-2 border-transparent focus:border-blue-500" />
+            </div>
+            <button onClick={() => onSave(doc)} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-3 rounded-2xl font-bold shadow-lg text-sm">סיום והפצה →</button>
+          </div>
+          <div className="flex flex-grow overflow-hidden">
+            <div className="w-80 border-l flex flex-col bg-white">
+              <div className="flex border-b">
+                <button onClick={() => setTab('signers')} className={`flex-1 py-4 font-bold text-xs uppercase ${tab==='signers'?'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50':'text-slate-400'}`}>חותמים</button>
+                <button onClick={() => setTab('fields')} className={`flex-1 py-4 font-bold text-xs uppercase ${tab==='fields'?'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50':'text-slate-400'}`}>שדות</button>
+              </div>
+              <div className="flex-grow overflow-y-auto p-5 custom-scrollbar space-y-4">
+                {tab === 'signers' ? (<div className="space-y-4">
+                  {doc.signers.map((s, i) => (
+                    <div key={s.id} className="p-4 bg-slate-50 rounded-2xl border space-y-3">
+                      <div className="flex justify-between items-center"><span className="text-[10px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">חותם {i+1}</span>{doc.signers.length > 1 && <button onClick={() => setDoc({...doc, signers: doc.signers.filter(x => x.id !== s.id)})} className="text-slate-300 hover:text-red-500 text-xs">&times;</button>}</div>
+                      <input type="text" placeholder="שם מלא *" value={s.name} onChange={e => setDoc({...doc, signers: doc.signers.map(x => x.id===s.id?{...x,name:e.target.value}:x)})} className="w-full p-3 border rounded-xl text-xs outline-none focus:border-blue-400 font-bold bg-white" />
+                      <input type="email" placeholder="אימייל" value={s.email} onChange={e => setDoc({...doc, signers: doc.signers.map(x => x.id===s.id?{...x,email:e.target.value}:x)})} className="w-full p-3 border rounded-xl text-xs outline-none focus:border-blue-400 font-bold bg-white" dir="ltr" />
+                      <input type="tel" placeholder="טלפון" value={s.phone} onChange={e => setDoc({...doc, signers: doc.signers.map(x => x.id===s.id?{...x,phone:e.target.value}:x)})} className="w-full p-3 border rounded-xl text-xs outline-none focus:border-blue-400 font-bold bg-white" dir="ltr" />
+                    </div>
+                  ))}
+                  <button onClick={addSigner} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold text-xs hover:border-blue-400 hover:text-blue-600">+ הוסף חותם</button>
+                </div>) : (<div className="space-y-3">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">לחצו להוספת שדה לעמוד {currentPage}</p>
+                  {fieldOpts.map(o => <button key={o.type} onClick={() => addField(o.type, o.label)} className="w-full p-4 border rounded-2xl text-right font-bold text-sm bg-white hover:border-blue-500 hover:bg-blue-50 flex items-center gap-3"><span className="text-lg">{o.icon}</span>{o.label}</button>)}
+                  {doc.fields.filter(f => f.page === currentPage).length > 0 && <div className="mt-6 pt-4 border-t space-y-2"><p className="text-[10px] font-bold text-slate-400 uppercase">שדות בעמוד</p>{doc.fields.filter(f => f.page === currentPage).map(f => <div key={f.id} className="flex justify-between items-center p-3 bg-blue-50 rounded-xl text-xs"><span className="font-bold text-blue-700">{f.label}</span><button onClick={() => setDoc({...doc, fields: doc.fields.filter(x => x.id !== f.id)})} className="text-red-400 hover:text-red-600">&times;</button></div>)}</div>}
+                </div>)}
+              </div>
+            </div>
+            <div className="flex-grow bg-slate-100 p-6 md:p-10 overflow-auto flex justify-center custom-scrollbar">
+              <div ref={containerRef} className="w-[600px] relative h-fit">
+                {pdfB64 ? <PDFViewer pdfBase64={pdfB64} currentPage={currentPage} onPageChange={setCurrentPage}>
+                  {doc.fields.filter(f => f.page === currentPage).map(field => (
+                    <div key={field.id} onMouseDown={e => { e.stopPropagation(); setMovingId(field.id); }} style={{left:`${field.x}%`,top:`${field.y}%`,transform:'translate(-50%,-50%)'}}
+                      className={`absolute p-3 bg-white border-2 border-blue-500 rounded-xl shadow-lg pointer-events-auto cursor-move z-20 flex items-center gap-2 select-none ${movingId===field.id?'scale-110 opacity-70 ring-4 ring-blue-200':''}`}>
+                      <div className="text-[10px] font-black text-blue-800">{field.label}</div>
+                      <select className="text-[8px] bg-slate-50 border rounded p-1 outline-none font-bold" value={field.signerId} onChange={e => setDoc({...doc, fields: doc.fields.map(f => f.id===field.id?{...f,signerId:e.target.value}:f)})}>
+                        {doc.signers.map(s => <option key={s.id} value={s.id}>{s.name || 'חותם ' + s.order}</option>)}
+                      </select>
+                      <button onClick={() => setDoc({...doc, fields: doc.fields.filter(f => f.id !== field.id)})} className="text-[10px] text-red-400 hover:text-red-600">&times;</button>
+                    </div>
+                  ))}
+                </PDFViewer> : <Loader message="טוען PDF..." />}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // SHARE CENTER
+    // =============================================
+    const ShareCenter = ({ document: doc, onClose, showToast }) => {
+      const [sendingId, setSendingId] = useState(null);
+      const [emailingId, setEmailingId] = useState(null);
+      const getLink = (sid) => SCRIPT_URL + '?sign=' + doc.id + '&signer=' + sid;
+
+      const sendWA = (s) => {
+        setSendingId(s.id);
+        const link = getLink(s.id);
+        const text = 'שלום ' + s.name + ',\n\nנא לחתום על "' + doc.title + '".\nהחתימה לוקחת פחות מדקה.\n\nקישור:\n' + link;
+        window.open('https://wa.me/' + s.phone.replace(/\D/g, '') + '?text=' + encodeURIComponent(text), '_blank');
+        setTimeout(() => setSendingId(null), 1000);
+      };
+
+      const sendMail = async (s) => {
+        if (!s.email) { showToast('נא להזין אימייל', 'error'); return; }
+        setEmailingId(s.id);
+        try {
+          const r = await gasRun('sendSigningEmail', s.email, s.name, doc.title, getLink(s.id));
+          showToast(r.success ? 'אימייל נשלח ל-' + s.email : 'שגיאה: ' + (r.error || ''), r.success ? 'success' : 'error');
+        } catch (e) { showToast('שגיאה בשליחה', 'error'); }
+        setEmailingId(null);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-3xl rounded-[32px] p-10 shadow-2xl animate-slide-up border">
+            <div className="flex justify-between items-start mb-8">
+              <div><h2 className="text-2xl font-black text-slate-800">מרכז הפצה</h2><p className="text-slate-400 text-sm mt-1">שלח לינק חתימה בדואל, וואטסאפ או העתק קישור</p></div>
+              <button onClick={onClose} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:bg-slate-100">&times;</button>
+            </div>
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 mb-6 flex items-center gap-4">
+              <div className="bg-blue-600 p-2 rounded-xl text-white"><ICONS.File className="w-5 h-5" /></div>
+              <div><p className="font-bold text-blue-800">{doc.title}</p><p className="text-xs text-blue-500">{doc.fileName} | {(doc.signers||[]).length} חותמים</p></div>
+            </div>
+            <div className="overflow-hidden border rounded-2xl">
+              <table className="w-full text-right">
+                <thead className="bg-slate-50 text-[10px] font-bold uppercase text-slate-400"><tr><th className="px-6 py-4">חותם</th><th className="px-6 py-4">סטטוס</th><th className="px-6 py-4">שליחה</th></tr></thead>
+                <tbody className="divide-y">{(doc.signers||[]).map(s => (
+                  <tr key={s.id}>
+                    <td className="px-6 py-5"><p className="font-bold text-slate-700">{s.name || 'ללא שם'}</p><p className="text-[10px] text-slate-400">{s.email}{s.email && s.phone ? ' | ' : ''}{s.phone}</p></td>
+                    <td className="px-6 py-5"><span className={`px-3 py-1 rounded-full text-[10px] font-bold ${s.hasSigned?'bg-green-100 text-green-600':'bg-amber-100 text-amber-600'}`}>{s.hasSigned?'חתם':'ממתין'}</span></td>
+                    <td className="px-6 py-5"><div className="flex gap-2">
+                      <button disabled={!s.phone||sendingId===s.id} onClick={() => sendWA(s)} className="p-2.5 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 flex items-center gap-1.5 font-bold text-[11px] disabled:opacity-40">{sendingId===s.id?<div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"/>:<ICONS.Phone className="w-4 h-4"/>}וואטסאפ</button>
+                      <button disabled={emailingId===s.id} onClick={() => sendMail(s)} className="p-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 flex items-center gap-1.5 font-bold text-[11px] disabled:opacity-40">{emailingId===s.id?<div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"/>:<ICONS.Mail className="w-4 h-4"/>}דוא"ל</button>
+                      <button onClick={() => { navigator.clipboard.writeText(getLink(s.id)); showToast('הקישור הועתק!','info'); }} className="p-2.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-slate-100"><ICONS.Share className="w-4 h-4" /></button>
+                    </div></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+            <div className="mt-8 flex justify-center"><button onClick={onClose} className="px-12 py-4 bg-slate-800 text-white font-bold rounded-2xl shadow-xl hover:bg-slate-900">סיום</button></div>
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // CONTACTS VIEW
+    // =============================================
+    const ContactsView = ({ contacts, setContacts }) => {
+      const [showAdd, setShowAdd] = useState(false);
+      const [nc, setNc] = useState({ firstName: '', lastName: '', phone: '', email: '' });
+      const handleAdd = async () => {
+        if (!nc.firstName || !nc.phone) return;
+        const updated = [...contacts, { ...nc, id: Math.random().toString(36).substr(2,9) }];
+        setContacts(updated);
+        await gasRun('saveAllContacts', updated);
+        setNc({ firstName:'', lastName:'', phone:'', email:'' });
+        setShowAdd(false);
+      };
+      const handleDelete = async (id) => {
+        const updated = contacts.filter(c => c.id !== id);
+        setContacts(updated);
+        await gasRun('saveAllContacts', updated);
+      };
+      return (
+        <div className="space-y-8 animate-slide-up">
+          <div className="flex justify-between items-end">
+            <div><h2 className="text-3xl font-black text-slate-800">אנשי קשר</h2><p className="text-slate-400">ניהול אנשי קשר לשליחה מהירה</p></div>
+            <button onClick={() => setShowAdd(true)} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-3 rounded-2xl font-bold shadow-lg flex items-center gap-2 text-sm"><ICONS.Plus className="w-5 h-5" /> הוסף</button>
+          </div>
+          <div className="bg-white rounded-[32px] border shadow-sm overflow-hidden">
+            <table className="w-full text-right">
+              <thead className="bg-slate-50 text-[10px] font-bold text-slate-400 uppercase"><tr><th className="px-8 py-6">שם</th><th className="px-8 py-6">טלפון</th><th className="px-8 py-6">אימייל</th><th className="px-8 py-6 text-left">פעולות</th></tr></thead>
+              <tbody className="divide-y">
+                {contacts.map(c => <tr key={c.id} className="hover:bg-slate-50"><td className="px-8 py-6 font-bold text-slate-700">{c.firstName} {c.lastName}</td><td className="px-8 py-6 text-slate-500">{c.phone}</td><td className="px-8 py-6 text-slate-400 text-sm">{c.email||'—'}</td><td className="px-8 py-6 text-left"><button onClick={() => handleDelete(c.id)} className="text-red-300 hover:text-red-500"><ICONS.Trash className="w-5 h-5" /></button></td></tr>)}
+                {contacts.length === 0 && <tr><td colSpan={4} className="py-16 text-center text-slate-300 font-bold">אין אנשי קשר</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {showAdd && <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-md rounded-[32px] p-10 space-y-5 shadow-2xl border animate-slide-up">
+              <h3 className="text-xl font-black text-slate-800">איש קשר חדש</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <input placeholder="שם פרטי *" value={nc.firstName} onChange={e => setNc({...nc,firstName:e.target.value})} className="p-4 border rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500 font-bold" />
+                <input placeholder="שם משפחה" value={nc.lastName} onChange={e => setNc({...nc,lastName:e.target.value})} className="p-4 border rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500 font-bold" />
+              </div>
+              <input placeholder="טלפון *" value={nc.phone} onChange={e => setNc({...nc,phone:e.target.value})} className="w-full p-4 border rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500 font-bold" dir="ltr" />
+              <input placeholder="אימייל" value={nc.email} onChange={e => setNc({...nc,email:e.target.value})} className="w-full p-4 border rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500 font-bold" dir="ltr" />
+              <div className="flex gap-4"><button onClick={() => setShowAdd(false)} className="flex-1 py-4 font-bold text-slate-400">ביטול</button><button onClick={handleAdd} className="flex-1 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-lg">שמור</button></div>
+            </div>
+          </div>}
+        </div>
+      );
+    };
+
+    // =============================================
+    // SIGNER PROCESS (Client signing page)
+    // =============================================
+    const SignerProcess = ({ document: doc, signerId: initialSignerId, loadPdf, onComplete, showToast }) => {
+      const [step, setStep] = useState(0);
+      const [values, setValues] = useState({});
+      const [sigDataUrls, setSigDataUrls] = useState({});
+      const [showSignPad, setShowSignPad] = useState(false);
+      const [isFinishing, setIsFinishing] = useState(false);
+      const [isCompleted, setIsCompleted] = useState(false);
+      const [currentPage, setCurrentPage] = useState(1);
+      const [pdfB64, setPdfB64] = useState(null);
+
+      // Determine which signer is currently signing
+      const currentSignerId = initialSignerId || (doc.signers && doc.signers[0] ? doc.signers[0].id : '');
+      const currentSigner = (doc.signers || []).find(s => s.id === currentSignerId) || (doc.signers && doc.signers[0]) || {};
+
+      // Filter fields to only show fields assigned to this signer
+      const allFields = doc.fields || [];
+      const fields = currentSignerId
+        ? allFields.filter(f => f.signerId === currentSignerId || !f.signerId)
+        : allFields;
+      const cf = fields[step];
+
+      useEffect(() => { if (doc.fileId) loadPdf(doc.fileId).then(setPdfB64); }, [doc.fileId]);
+
+      // Auto-navigate to the correct page when step changes
+      useEffect(() => {
+        if (cf && cf.page && cf.page !== currentPage) {
+          setCurrentPage(cf.page);
+        }
+      }, [step, cf]);
+
+      const handleSig = (dataUrl) => {
+        if (!cf) return;
+        setSigDataUrls(prev => ({...prev, [cf.id]: dataUrl}));
+        setValues(prev => ({...prev, [cf.id]: 'SIGNED'}));
+        setShowSignPad(false);
+        if (step < fields.length - 1) setStep(step + 1);
+      };
+
+      const handleFinish = async () => {
+        setIsFinishing(true);
+        try {
+          // Use pdf-lib on client to embed signatures and text fields
+          const arr = safeBase64ToUint8Array(pdfB64);
+          const pdfDoc = await PDFLib.PDFDocument.load(arr);
+
+          for (const f of fields) {
+            const pageIdx = (f.page || 1) - 1;
+            if (pageIdx < 0 || pageIdx >= pdfDoc.getPageCount()) continue;
+            const page = pdfDoc.getPage(pageIdx);
+            const { width, height } = page.getSize();
+
+            if ((f.type === 'SIGNATURE' || f.type === 'INITIALS') && sigDataUrls[f.id]) {
+              try {
+                const imgB64 = sigDataUrls[f.id].split(',')[1];
+                const imgBytes = safeBase64ToUint8Array(imgB64);
+                const img = await pdfDoc.embedPng(imgBytes);
+                const sw = 150, sh = 60;
+                page.drawImage(img, {
+                  x: Math.max(0, (f.x / 100) * width - sw / 2),
+                  y: Math.max(0, height - (f.y / 100) * height - sh / 2),
+                  width: sw,
+                  height: sh
+                });
+              } catch (e) { console.error('Embed signature error:', e); }
+            } else if (values[f.id] && f.type !== 'SIGNATURE' && f.type !== 'INITIALS') {
+              // Embed text fields (date, ID, text, address) into the PDF
+              try {
+                const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                const textVal = String(values[f.id]);
+                const fontSize = 12;
+                const textWidth = font.widthOfTextAtSize(textVal, fontSize);
+                page.drawText(textVal, {
+                  x: Math.max(0, (f.x / 100) * width - textWidth / 2),
+                  y: Math.max(0, height - (f.y / 100) * height - fontSize / 2),
+                  size: fontSize,
+                  font: font,
+                  color: PDFLib.rgb(0.12, 0.15, 0.2)
+                });
+              } catch (e) { console.error('Embed text error:', e); }
+            }
+          }
+
+          const signedBytes = await pdfDoc.save();
+          const signedB64 = safeUint8ArrayToBase64(new Uint8Array(signedBytes));
+          const signerName = currentSigner.name || 'לקוח';
+
+          await gasRun('saveSignedDocument', signedB64, doc.id, signerName, currentSignerId);
+          showToast('המסמך נחתם בהצלחה! עותק נשלח למשרד.');
+          setIsCompleted(true);
+        } catch (err) {
+          console.error('Signing error:', err);
+          showToast('שגיאה בחתימה: ' + (err.message || err), 'error');
+        }
+        setIsFinishing(false);
+      };
+
+      if (isCompleted) {
+        return (
+          <div className="max-w-xl mx-auto py-20 text-center space-y-8 animate-slide-up">
+            <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto shadow-lg"><ICONS.Check className="w-12 h-12" /></div>
+            <h2 className="text-3xl font-black text-slate-800">החתימה הושלמה!</h2>
+            <p className="text-slate-500 text-lg">המסמך "<strong>{doc.title}</strong>" נחתם ונשלח למשרד.</p>
+            <p className="text-slate-400 text-sm">עותק חתום נשלח ל: peri@bettylaw.co.il</p>
+            <div className="bg-green-50 border border-green-100 rounded-2xl p-6 inline-block"><p className="text-green-700 font-bold text-sm">תודה! ניתן לסגור עמוד זה.</p></div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="flex flex-col gap-6 animate-slide-up max-w-5xl mx-auto">
+          {isFinishing && <div className="fixed inset-0 bg-white/90 backdrop-blur-md z-[200] flex flex-col items-center justify-center"><Loader message="מעבד חתימה ושולח למשרד..." /></div>}
+          {showSignPad && <SignaturePad onSave={handleSig} onCancel={() => setShowSignPad(false)} />}
+
+          <div className="bg-white p-8 rounded-[32px] border shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="flex items-center gap-5">
+              <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-3 rounded-2xl text-white shadow-lg shadow-blue-200"><ICONS.Logo className="w-8 h-8" /></div>
+              <div className="text-right"><h2 className="text-xl font-black text-slate-800">חתימה על: {doc.title}</h2><p className="text-xs text-slate-400 font-bold uppercase">{currentSigner.name ? 'שלום ' + currentSigner.name + ', נא למלא את כל השדות' : 'נא למלא את כל השדות'}</p></div>
+            </div>
+            {fields.length > 0 && <div className="flex items-center gap-3">
+              <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full">שלב {step+1}/{fields.length}</span>
+              <div className="w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all" style={{width:`${((step+1)/Math.max(fields.length,1))*100}%`}}></div></div>
+            </div>}
+          </div>
+
+          <div className="flex flex-col lg:flex-row gap-8">
+            <div className="flex-grow bg-slate-200/30 p-6 rounded-[32px] border shadow-inner flex justify-center overflow-auto min-h-[65vh]">
+              <div className="w-full max-w-[620px] relative">
+                {pdfB64 ? <PDFViewer pdfBase64={pdfB64} currentPage={currentPage} onPageChange={setCurrentPage}>
+                  {fields.filter(f => f.page === currentPage).map(f => {
+                    const gi = fields.indexOf(f);
+                    return <div key={f.id} style={{left:`${f.x}%`,top:`${f.y}%`,transform:'translate(-50%,-50%)'}}
+                      className={`absolute p-4 rounded-2xl border-2 shadow-xl font-bold text-xs pointer-events-auto cursor-pointer transition-all
+                        ${step===gi?'bg-blue-600 text-white scale-110 z-30 ring-8 ring-blue-100 animate-pulse':values[f.id]?'bg-green-100 border-green-500 text-green-700':'bg-white/95 border-blue-400 text-blue-600'}`}
+                      onClick={() => setStep(gi)}>
+                      {values[f.id] ? (sigDataUrls[f.id] ? <img src={sigDataUrls[f.id]} alt="sig" className="h-8 w-auto" /> : '✓ ' + (f.type === 'SIGNATURE' || f.type === 'INITIALS' ? f.label : values[f.id])) : f.label}
+                    </div>;
+                  })}
+                </PDFViewer> : <Loader message="טוען מסמך..." />}
+              </div>
+            </div>
+
+            {fields.length > 0 && <div className="w-full lg:w-80 flex flex-col gap-6">
+              <div className="bg-white p-8 rounded-[32px] border shadow-sm space-y-6">
+                <h3 className="font-black text-slate-800">פעולה נדרשת</h3>
+                <div className="p-6 bg-blue-50 border border-blue-100 rounded-2xl"><label className="text-[9px] font-black text-blue-400 uppercase">שדה נוכחי</label><p className="font-black text-blue-900 text-lg">{cf ? cf.label : ''}</p></div>
+                <div className="space-y-4">
+                  {cf && (cf.type === 'SIGNATURE' || cf.type === 'INITIALS') ? (
+                    <button onClick={() => setShowSignPad(true)} className={`w-full py-5 font-black rounded-2xl shadow-xl flex items-center justify-center gap-2 ${sigDataUrls[cf.id]?'bg-green-600 text-white hover:bg-green-700':'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                      <ICONS.Edit className="w-5 h-5" />{sigDataUrls[cf.id]?'חתימה מוכנה - לחץ לשנות':'לחץ לחתום'}
+                    </button>
+                  ) : cf && cf.type === 'DATE' ? (
+                    <input type="date" className="w-full p-5 border-2 border-slate-100 bg-slate-50 rounded-2xl outline-none focus:border-blue-600 font-bold" value={values[cf.id]||''} onChange={e => { setValues({...values,[cf.id]:e.target.value}); if(step<fields.length-1) setTimeout(() => setStep(step+1),300); }} />
+                  ) : cf ? (
+                    <input type="text" placeholder={'הזן ' + (cf.label||'') + '...'} className="w-full p-5 border-2 border-slate-100 bg-slate-50 rounded-2xl outline-none focus:border-blue-600 font-bold" value={values[cf.id]||''} onChange={e => setValues({...values,[cf.id]:e.target.value})} onKeyDown={e => { if(e.key==='Enter'&&step<fields.length-1) setStep(step+1); }} />
+                  ) : null}
+                  <div className="flex gap-3">
+                    <button disabled={step===0} onClick={() => setStep(step-1)} className="flex-1 py-3 bg-slate-100 text-slate-400 rounded-2xl font-bold disabled:opacity-30">הקודם</button>
+                    <button disabled={step>=fields.length-1} onClick={() => setStep(step+1)} className="flex-1 py-3 bg-slate-800 text-white rounded-2xl font-bold disabled:opacity-30">הבא</button>
+                  </div>
+                </div>
+              </div>
+              <button disabled={Object.keys(values).length < fields.length} onClick={handleFinish}
+                className={`w-full py-6 font-black rounded-[32px] shadow-2xl text-xl transition-all active:scale-95 ${Object.keys(values).length<fields.length?'bg-slate-200 text-slate-400 cursor-not-allowed':'bg-gradient-to-r from-green-600 to-green-700 text-white shadow-lg'}`}>
+                {Object.keys(values).length < fields.length ? 'נותרו ' + (fields.length - Object.keys(values).length) + ' שדות' : 'סיום וחתימה סופית'}
+              </button>
+            </div>}
+
+            {fields.length === 0 && <div className="w-full text-center py-20"><div className="bg-amber-50 border border-amber-100 rounded-2xl p-8 inline-block"><p className="text-amber-700 font-bold">לא הוגדרו שדות לחתימה במסמך זה.</p><p className="text-amber-500 text-sm mt-2">נא לפנות לשולח המסמך.</p></div></div>}
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // MOUNT
+    // =============================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
