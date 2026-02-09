@@ -1,0 +1,1061 @@
+<script>
+// ============================================
+// מערכת ניהול לקוחות - JavaScript צד לקוח
+// ============================================
+
+// === משתנים גלובליים ===
+let allClients = [];
+let allCases = [];
+let allHearings = [];
+let allTasks = [];
+let currentTaskFilter = 'all';
+
+// === אתחול ===
+document.addEventListener('DOMContentLoaded', function() {
+  loadDashboard();
+});
+
+// ============================================
+// === ניווט ===
+// ============================================
+
+function showPage(pageName) {
+  // הסתרת כל הדפים
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+  // הצגת הדף הנבחר
+  document.getElementById('page-' + pageName).classList.add('active');
+  document.querySelector('[data-page="' + pageName + '"]').classList.add('active');
+
+  // טעינת נתונים בהתאם לדף
+  switch(pageName) {
+    case 'dashboard': loadDashboard(); break;
+    case 'clients': loadClients(); break;
+    case 'cases': loadCases(); break;
+    case 'hearings': loadHearings(); break;
+    case 'tasks': loadTasks(); break;
+  }
+}
+
+// ============================================
+// === דשבורד ===
+// ============================================
+
+function loadDashboard() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(data) {
+      hideLoading();
+
+      // עדכון סטטיסטיקות
+      document.getElementById('stat-clients').textContent = data.totalClients;
+      document.getElementById('stat-cases').textContent = data.openCases;
+      document.getElementById('stat-tasks').textContent = data.openTasks.length;
+      document.getElementById('stat-urgent').textContent = data.urgentItems;
+
+      // דיונים היום
+      renderTodayHearings(data.todayHearings);
+
+      // דיונים קרובים
+      renderUpcomingHearings(data.upcomingHearings);
+
+      // משימות באיחור
+      renderOverdueTasks(data.overdueTasks);
+
+      // משימות פתוחות
+      renderOpenTasks(data.openTasks);
+    })
+    .withFailureHandler(handleError)
+    .getDashboardData();
+}
+
+function renderTodayHearings(hearings) {
+  const container = document.getElementById('today-hearings');
+  if (hearings.length === 0) {
+    container.innerHTML = '<div class="empty-state">אין דיונים היום</div>';
+    return;
+  }
+
+  container.innerHTML = hearings.map(h => {
+    return '<div class="hearing-item">' +
+      '<div class="hearing-date-badge today">' +
+        '<div class="hearing-date-day">היום</div>' +
+      '</div>' +
+      '<div class="hearing-details">' +
+        '<div class="hearing-client">' + escapeHtml(h.clientName) + '</div>' +
+        '<div class="hearing-info">תיק: ' + escapeHtml(h.caseNumber) + ' | ' + escapeHtml(h.court) +
+        (h.hall ? ' | אולם ' + escapeHtml(h.hall) : '') + '</div>' +
+      '</div>' +
+      '<div class="hearing-time">' + escapeHtml(h.time) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderUpcomingHearings(hearings) {
+  const container = document.getElementById('upcoming-hearings');
+  if (hearings.length === 0) {
+    container.innerHTML = '<div class="empty-state">אין דיונים ב-7 ימים הקרובים</div>';
+    return;
+  }
+
+  container.innerHTML = hearings.map(h => {
+    const date = new Date(h.date);
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    let badgeClass = '';
+    let dayLabel = date.getDate();
+    if (isSameDay(date, today)) { badgeClass = 'today'; dayLabel = 'היום'; }
+    else if (isSameDay(date, tomorrow)) { badgeClass = 'tomorrow'; }
+
+    const monthNames = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יוני', 'יולי', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ'];
+
+    return '<div class="hearing-item">' +
+      '<div class="hearing-date-badge ' + badgeClass + '">' +
+        '<div class="hearing-date-day">' + dayLabel + '</div>' +
+        '<div class="hearing-date-month">' + monthNames[date.getMonth()] + '</div>' +
+      '</div>' +
+      '<div class="hearing-details">' +
+        '<div class="hearing-client">' + escapeHtml(h.clientName) + '</div>' +
+        '<div class="hearing-info">תיק: ' + escapeHtml(h.caseNumber) + ' | ' + escapeHtml(h.court) +
+        (h.hall ? ' | אולם ' + escapeHtml(h.hall) : '') + '</div>' +
+      '</div>' +
+      '<div class="hearing-time">' + escapeHtml(h.time || '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderOverdueTasks(tasks) {
+  const container = document.getElementById('overdue-tasks');
+  if (tasks.length === 0) {
+    container.innerHTML = '<div class="empty-state">אין משימות באיחור - מצוין!</div>';
+    return;
+  }
+
+  container.innerHTML = tasks.map(t => {
+    const dueDate = t.dueDate ? formatDate(new Date(t.dueDate)) : '';
+    return '<div class="task-item priority-urgent">' +
+      '<div class="task-info">' +
+        '<div class="task-description">' + escapeHtml(t.description) + '</div>' +
+        '<div class="task-meta">' +
+          (t.clientName ? '<span>' + escapeHtml(t.clientName) + '</span>' : '') +
+          '<span class="task-overdue">איחור: ' + dueDate + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<button class="btn btn-sm btn-success" onclick="markTaskDone(\'' + t.id + '\')">סיום</button>' +
+    '</div>';
+  }).join('');
+}
+
+function renderOpenTasks(tasks) {
+  const container = document.getElementById('open-tasks-dashboard');
+  if (tasks.length === 0) {
+    container.innerHTML = '<div class="empty-state">אין משימות פתוחות</div>';
+    return;
+  }
+
+  const displayTasks = tasks.slice(0, 5);
+  container.innerHTML = displayTasks.map(t => {
+    const priorityClass = getPriorityClass(t.priority);
+    const priorityLabel = getPriorityLabel(t.priority);
+    const dueDate = t.dueDate ? formatDate(new Date(t.dueDate)) : '';
+
+    return '<div class="task-item priority-' + priorityClass + '">' +
+      '<div class="task-info">' +
+        '<div class="task-description">' + escapeHtml(t.description) + '</div>' +
+        '<div class="task-meta">' +
+          (t.clientName ? '<span>' + escapeHtml(t.clientName) + '</span>' : '') +
+          (dueDate ? '<span>יעד: ' + dueDate + '</span>' : '') +
+          '<span class="task-priority ' + priorityClass + '">' + priorityLabel + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  if (tasks.length > 5) {
+    container.innerHTML += '<div class="text-center mt-10">' +
+      '<button class="btn btn-sm btn-primary" onclick="showPage(\'tasks\')">הצג את כל ' + tasks.length + ' המשימות</button>' +
+    '</div>';
+  }
+}
+
+// ============================================
+// === לקוחות ===
+// ============================================
+
+function loadClients() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(clients) {
+      hideLoading();
+      allClients = clients;
+      renderClientsTable(clients);
+    })
+    .withFailureHandler(handleError)
+    .getClients();
+}
+
+function renderClientsTable(clients) {
+  const tbody = document.getElementById('clients-tbody');
+  if (clients.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="padding: 30px; color: #999;">אין לקוחות עדיין. לחץ "לקוח חדש" להוספה</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = clients.map(c => {
+    return '<tr>' +
+      '<td><strong>' + escapeHtml(c.name) + '</strong></td>' +
+      '<td>' + escapeHtml(c.idNumber || '') + '</td>' +
+      '<td>' + escapeHtml(c.phone || '') + '</td>' +
+      '<td>' + escapeHtml(c.email || '') + '</td>' +
+      '<td class="action-buttons">' +
+        '<button class="btn-icon" title="עריכה" onclick=\'editClient(' + JSON.stringify(c).replace(/'/g, "\\'") + ')\'>✏️</button>' +
+        '<button class="btn-icon" title="תיקים" onclick="showClientCases(\'' + c.id + '\', \'' + escapeHtml(c.name) + '\')">📁</button>' +
+        '<button class="btn-icon" title="מחיקה" onclick="confirmDeleteClient(\'' + c.id + '\', \'' + escapeHtml(c.name) + '\')">🗑️</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function showClientForm(client) {
+  const isEdit = !!client;
+  document.getElementById('modal-title').textContent = isEdit ? 'עריכת לקוח' : 'לקוח חדש';
+
+  const html = '<form id="client-form" onsubmit="saveClient(event)">' +
+    (isEdit ? '<input type="hidden" id="client-id" value="' + client.id + '">' : '') +
+    '<div class="form-row">' +
+      '<div class="form-group">' +
+        '<label>שם מלא *</label>' +
+        '<input type="text" id="client-name" required value="' + (isEdit ? escapeHtml(client.name) : '') + '">' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label>תעודת זהות</label>' +
+        '<input type="text" id="client-id-number" value="' + (isEdit ? escapeHtml(client.idNumber || '') : '') + '">' +
+      '</div>' +
+    '</div>' +
+    '<div class="form-row">' +
+      '<div class="form-group">' +
+        '<label>טלפון *</label>' +
+        '<input type="tel" id="client-phone" required value="' + (isEdit ? escapeHtml(client.phone || '') : '') + '">' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label>אימייל</label>' +
+        '<input type="email" id="client-email" value="' + (isEdit ? escapeHtml(client.email || '') : '') + '">' +
+      '</div>' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label>כתובת</label>' +
+      '<input type="text" id="client-address" value="' + (isEdit ? escapeHtml(client.address || '') : '') + '">' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label>הערות</label>' +
+      '<textarea id="client-notes">' + (isEdit ? escapeHtml(client.notes || '') : '') + '</textarea>' +
+    '</div>' +
+    '<div class="form-actions">' +
+      '<button type="submit" class="btn btn-primary">' + (isEdit ? 'עדכן' : 'הוסף לקוח') + '</button>' +
+      '<button type="button" class="btn" onclick="closeModal()">ביטול</button>' +
+    '</div>' +
+  '</form>';
+
+  document.getElementById('modal-body').innerHTML = html;
+  openModal();
+}
+
+function editClient(client) {
+  showClientForm(client);
+}
+
+function saveClient(e) {
+  e.preventDefault();
+  showLoading();
+
+  const clientData = {
+    name: document.getElementById('client-name').value,
+    idNumber: document.getElementById('client-id-number').value,
+    phone: document.getElementById('client-phone').value,
+    email: document.getElementById('client-email').value,
+    address: document.getElementById('client-address').value,
+    notes: document.getElementById('client-notes').value
+  };
+
+  const idField = document.getElementById('client-id');
+  if (idField) {
+    clientData.id = idField.value;
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadClients();
+      })
+      .withFailureHandler(handleError)
+      .updateClient(clientData);
+  } else {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadClients();
+      })
+      .withFailureHandler(handleError)
+      .addClient(clientData);
+  }
+}
+
+function confirmDeleteClient(id, name) {
+  if (confirm('האם אתה בטוח שברצונך למחוק את הלקוח "' + name + '"?\nפעולה זו אינה ניתנת לביטול.')) {
+    showLoading();
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadClients();
+      })
+      .withFailureHandler(handleError)
+      .deleteClient(id);
+  }
+}
+
+function showClientCases(clientId, clientName) {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(cases) {
+      hideLoading();
+      document.getElementById('modal-title').textContent = 'תיקים של ' + clientName;
+
+      if (cases.length === 0) {
+        document.getElementById('modal-body').innerHTML =
+          '<div class="empty-state">אין תיקים ללקוח זה</div>' +
+          '<div class="text-center"><button class="btn btn-primary" onclick="closeModal(); showCaseForm(null, \'' + clientId + '\', \'' + escapeHtml(clientName) + '\')">+ הוסף תיק</button></div>';
+      } else {
+        let html = '<table class="data-table"><thead><tr><th>מספר תיק</th><th>עבירה</th><th>סטטוס</th></tr></thead><tbody>';
+        cases.forEach(c => {
+          html += '<tr><td>' + escapeHtml(c.caseNumber) + '</td><td>' + escapeHtml(c.offenseType) + '</td><td>' + getStatusBadge(c.status) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        document.getElementById('modal-body').innerHTML = html;
+      }
+      openModal();
+    })
+    .withFailureHandler(handleError)
+    .getCasesByClient(clientId);
+}
+
+// ============================================
+// === תיקים ===
+// ============================================
+
+function loadCases() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(cases) {
+      hideLoading();
+      allCases = cases;
+      renderCasesTable(cases);
+    })
+    .withFailureHandler(handleError)
+    .getCases();
+}
+
+function renderCasesTable(cases) {
+  const tbody = document.getElementById('cases-tbody');
+  if (cases.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding: 30px; color: #999;">אין תיקים עדיין. לחץ "תיק חדש" להוספה</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = cases.map(c => {
+    return '<tr>' +
+      '<td><strong>' + escapeHtml(c.caseNumber || '') + '</strong></td>' +
+      '<td>' + escapeHtml(c.clientName || '') + '</td>' +
+      '<td>' + escapeHtml(c.offenseType || '') + '</td>' +
+      '<td>' + escapeHtml(c.court || '') + '</td>' +
+      '<td>' + getStatusBadge(c.status) + '</td>' +
+      '<td class="action-buttons">' +
+        '<button class="btn-icon" title="עריכה" onclick=\'editCase(' + JSON.stringify(c).replace(/'/g, "\\'") + ')\'>✏️</button>' +
+        '<button class="btn-icon" title="מחיקה" onclick="confirmDeleteCase(\'' + c.id + '\')">🗑️</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function showCaseForm(caseData, clientId, clientName) {
+  const isEdit = !!caseData;
+  document.getElementById('modal-title').textContent = isEdit ? 'עריכת תיק' : 'תיק חדש';
+
+  // בניית רשימת לקוחות
+  google.script.run
+    .withSuccessHandler(function(clients) {
+      let clientOptions = '<option value="">בחר לקוח...</option>';
+      clients.forEach(c => {
+        const selected = (isEdit && caseData.clientId === c.id) || (clientId === c.id) ? ' selected' : '';
+        clientOptions += '<option value="' + c.id + '"' + selected + '>' + escapeHtml(c.name) + '</option>';
+      });
+
+      const html = '<form id="case-form" onsubmit="saveCase(event)">' +
+        (isEdit ? '<input type="hidden" id="case-id" value="' + caseData.id + '">' : '') +
+        '<div class="form-group">' +
+          '<label>לקוח *</label>' +
+          '<select id="case-client" required>' + clientOptions + '</select>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group">' +
+            '<label>מספר תיק בית משפט</label>' +
+            '<input type="text" id="case-number" value="' + (isEdit ? escapeHtml(caseData.caseNumber || '') : '') + '">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>סוג עבירה *</label>' +
+            '<select id="case-offense" required>' +
+              '<option value="">בחר...</option>' +
+              '<option value="נהיגה במהירות מופרזת"' + (isEdit && caseData.offenseType === 'נהיגה במהירות מופרזת' ? ' selected' : '') + '>נהיגה במהירות מופרזת</option>' +
+              '<option value="נהיגה בשכרות"' + (isEdit && caseData.offenseType === 'נהיגה בשכרות' ? ' selected' : '') + '>נהיגה בשכרות</option>' +
+              '<option value="נהיגה ללא רישיון"' + (isEdit && caseData.offenseType === 'נהיגה ללא רישיון' ? ' selected' : '') + '>נהיגה ללא רישיון</option>' +
+              '<option value="עבירת רמזור"' + (isEdit && caseData.offenseType === 'עבירת רמזור' ? ' selected' : '') + '>עבירת רמזור</option>' +
+              '<option value="נהיגה בזמן פסילה"' + (isEdit && caseData.offenseType === 'נהיגה בזמן פסילה' ? ' selected' : '') + '>נהיגה בזמן פסילה</option>' +
+              '<option value="תאונת דרכים"' + (isEdit && caseData.offenseType === 'תאונת דרכים' ? ' selected' : '') + '>תאונת דרכים</option>' +
+              '<option value="שימוש בטלפון"' + (isEdit && caseData.offenseType === 'שימוש בטלפון' ? ' selected' : '') + '>שימוש בטלפון</option>' +
+              '<option value="אי חגירת חגורה"' + (isEdit && caseData.offenseType === 'אי חגירת חגורה' ? ' selected' : '') + '>אי חגירת חגורה</option>' +
+              '<option value="אחר"' + (isEdit && caseData.offenseType === 'אחר' ? ' selected' : '') + '>אחר</option>' +
+            '</select>' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group">' +
+            '<label>בית משפט *</label>' +
+            '<select id="case-court" required>' +
+              '<option value="">בחר...</option>' +
+              '<option value="בית משפט השלום תל אביב"' + (isEdit && caseData.court === 'בית משפט השלום תל אביב' ? ' selected' : '') + '>בית משפט השלום תל אביב</option>' +
+              '<option value="בית משפט השלום ירושלים"' + (isEdit && caseData.court === 'בית משפט השלום ירושלים' ? ' selected' : '') + '>בית משפט השלום ירושלים</option>' +
+              '<option value="בית משפט השלום חיפה"' + (isEdit && caseData.court === 'בית משפט השלום חיפה' ? ' selected' : '') + '>בית משפט השלום חיפה</option>' +
+              '<option value="בית משפט השלום באר שבע"' + (isEdit && caseData.court === 'בית משפט השלום באר שבע' ? ' selected' : '') + '>בית משפט השלום באר שבע</option>' +
+              '<option value="בית משפט השלום נתניה"' + (isEdit && caseData.court === 'בית משפט השלום נתניה' ? ' selected' : '') + '>בית משפט השלום נתניה</option>' +
+              '<option value="בית משפט השלום ראשון לציון"' + (isEdit && caseData.court === 'בית משפט השלום ראשון לציון' ? ' selected' : '') + '>בית משפט השלום ראשון לציון</option>' +
+              '<option value="בית משפט השלום פתח תקווה"' + (isEdit && caseData.court === 'בית משפט השלום פתח תקווה' ? ' selected' : '') + '>בית משפט השלום פתח תקווה</option>' +
+              '<option value="בית משפט השלום הרצליה"' + (isEdit && caseData.court === 'בית משפט השלום הרצליה' ? ' selected' : '') + '>בית משפט השלום הרצליה</option>' +
+              '<option value="בית משפט השלום כפר סבא"' + (isEdit && caseData.court === 'בית משפט השלום כפר סבא' ? ' selected' : '') + '>בית משפט השלום כפר סבא</option>' +
+              '<option value="בית משפט השלום אשדוד"' + (isEdit && caseData.court === 'בית משפט השלום אשדוד' ? ' selected' : '') + '>בית משפט השלום אשדוד</option>' +
+              '<option value="בית משפט לתעבורה תל אביב"' + (isEdit && caseData.court === 'בית משפט לתעבורה תל אביב' ? ' selected' : '') + '>בית משפט לתעבורה תל אביב</option>' +
+              '<option value="בית משפט לתעבורה ירושלים"' + (isEdit && caseData.court === 'בית משפט לתעבורה ירושלים' ? ' selected' : '') + '>בית משפט לתעבורה ירושלים</option>' +
+              '<option value="בית משפט לתעבורה חיפה"' + (isEdit && caseData.court === 'בית משפט לתעבורה חיפה' ? ' selected' : '') + '>בית משפט לתעבורה חיפה</option>' +
+              '<option value="בית משפט לתעבורה נתניה"' + (isEdit && caseData.court === 'בית משפט לתעבורה נתניה' ? ' selected' : '') + '>בית משפט לתעבורה נתניה</option>' +
+              '<option value="אחר"' + (isEdit && caseData.court === 'אחר' ? ' selected' : '') + '>אחר</option>' +
+            '</select>' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>סטטוס</label>' +
+            '<select id="case-status">' +
+              '<option value="פתוח"' + (isEdit && caseData.status === 'פתוח' ? ' selected' : '') + '>פתוח</option>' +
+              '<option value="בטיפול"' + (isEdit && caseData.status === 'בטיפול' ? ' selected' : '') + '>בטיפול</option>' +
+              '<option value="ממתין לדיון"' + (isEdit && caseData.status === 'ממתין לדיון' ? ' selected' : '') + '>ממתין לדיון</option>' +
+              '<option value="ממתין לפסק דין"' + (isEdit && caseData.status === 'ממתין לפסק דין' ? ' selected' : '') + '>ממתין לפסק דין</option>' +
+              '<option value="סגור"' + (isEdit && caseData.status === 'סגור' ? ' selected' : '') + '>סגור</option>' +
+            '</select>' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label>שכר טרחה</label>' +
+          '<input type="number" id="case-fee" value="' + (isEdit ? (caseData.fee || '') : '') + '" placeholder="סכום בשקלים">' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label>הערות</label>' +
+          '<textarea id="case-notes">' + (isEdit ? escapeHtml(caseData.notes || '') : '') + '</textarea>' +
+        '</div>' +
+        '<div class="form-actions">' +
+          '<button type="submit" class="btn btn-primary">' + (isEdit ? 'עדכן' : 'הוסף תיק') + '</button>' +
+          '<button type="button" class="btn" onclick="closeModal()">ביטול</button>' +
+        '</div>' +
+      '</form>';
+
+      document.getElementById('modal-body').innerHTML = html;
+      openModal();
+    })
+    .withFailureHandler(handleError)
+    .getClients();
+}
+
+function editCase(caseData) {
+  showCaseForm(caseData);
+}
+
+function saveCase(e) {
+  e.preventDefault();
+  showLoading();
+
+  const caseData = {
+    clientId: document.getElementById('case-client').value,
+    caseNumber: document.getElementById('case-number').value,
+    offenseType: document.getElementById('case-offense').value,
+    court: document.getElementById('case-court').value,
+    status: document.getElementById('case-status').value,
+    fee: document.getElementById('case-fee').value,
+    notes: document.getElementById('case-notes').value
+  };
+
+  const idField = document.getElementById('case-id');
+  if (idField) {
+    caseData.id = idField.value;
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadCases();
+      })
+      .withFailureHandler(handleError)
+      .updateCase(caseData);
+  } else {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadCases();
+      })
+      .withFailureHandler(handleError)
+      .addCase(caseData);
+  }
+}
+
+function confirmDeleteCase(id) {
+  if (confirm('האם אתה בטוח שברצונך למחוק תיק זה?')) {
+    showLoading();
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadCases();
+      })
+      .withFailureHandler(handleError)
+      .deleteCase(id);
+  }
+}
+
+// ============================================
+// === דיונים ===
+// ============================================
+
+function loadHearings() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(hearings) {
+      hideLoading();
+      allHearings = hearings;
+      renderHearingsTable(hearings);
+    })
+    .withFailureHandler(handleError)
+    .getHearings();
+}
+
+function renderHearingsTable(hearings) {
+  const tbody = document.getElementById('hearings-tbody');
+  if (hearings.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 30px; color: #999;">אין דיונים. לחץ "דיון חדש" להוספה</td></tr>';
+    return;
+  }
+
+  // מיון לפי תאריך
+  hearings.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  tbody.innerHTML = hearings.map(h => {
+    const date = h.date ? formatDate(new Date(h.date)) : '';
+    const isPast = h.date && new Date(h.date) < new Date();
+    const rowClass = isPast ? 'style="opacity: 0.5;"' : '';
+
+    return '<tr ' + rowClass + '>' +
+      '<td>' + date + '</td>' +
+      '<td>' + escapeHtml(h.time || '') + '</td>' +
+      '<td>' + escapeHtml(h.clientName || '') + '</td>' +
+      '<td>' + escapeHtml(h.caseNumber || '') + '</td>' +
+      '<td>' + escapeHtml(h.court || '') + '</td>' +
+      '<td>' + escapeHtml(h.hall || '') + '</td>' +
+      '<td>' + escapeHtml(h.type || '') + '</td>' +
+      '<td class="action-buttons">' +
+        '<button class="btn-icon" title="עריכה" onclick=\'editHearing(' + JSON.stringify(h).replace(/'/g, "\\'") + ')\'>✏️</button>' +
+        '<button class="btn-icon" title="מחיקה" onclick="confirmDeleteHearing(\'' + h.id + '\')">🗑️</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function showHearingForm(hearingData) {
+  const isEdit = !!hearingData;
+  document.getElementById('modal-title').textContent = isEdit ? 'עריכת דיון' : 'דיון חדש';
+
+  // טעינת תיקים
+  google.script.run
+    .withSuccessHandler(function(cases) {
+      let caseOptions = '<option value="">בחר תיק...</option>';
+      cases.forEach(c => {
+        const selected = (isEdit && hearingData.caseId === c.id) ? ' selected' : '';
+        caseOptions += '<option value="' + c.id + '"' + selected + '>' +
+          escapeHtml(c.caseNumber || 'ללא מספר') + ' - ' + escapeHtml(c.clientName) + '</option>';
+      });
+
+      const dateValue = isEdit && hearingData.date ? formatDateForInput(new Date(hearingData.date)) : '';
+
+      const html = '<form id="hearing-form" onsubmit="saveHearing(event)">' +
+        (isEdit ? '<input type="hidden" id="hearing-id" value="' + hearingData.id + '">' : '') +
+        '<div class="form-group">' +
+          '<label>תיק *</label>' +
+          '<select id="hearing-case" required>' + caseOptions + '</select>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group">' +
+            '<label>תאריך דיון *</label>' +
+            '<input type="date" id="hearing-date" required value="' + dateValue + '">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>שעת דיון *</label>' +
+            '<input type="time" id="hearing-time" required value="' + (isEdit ? escapeHtml(hearingData.time || '') : '') + '">' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group">' +
+            '<label>בית משפט</label>' +
+            '<input type="text" id="hearing-court" value="' + (isEdit ? escapeHtml(hearingData.court || '') : '') + '">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>אולם</label>' +
+            '<input type="text" id="hearing-hall" value="' + (isEdit ? escapeHtml(hearingData.hall || '') : '') + '">' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label>סוג דיון</label>' +
+          '<select id="hearing-type">' +
+            '<option value="הקראה"' + (isEdit && hearingData.type === 'הקראה' ? ' selected' : '') + '>הקראה</option>' +
+            '<option value="הוכחות"' + (isEdit && hearingData.type === 'הוכחות' ? ' selected' : '') + '>הוכחות</option>' +
+            '<option value="טיעונים לעונש"' + (isEdit && hearingData.type === 'טיעונים לעונש' ? ' selected' : '') + '>טיעונים לעונש</option>' +
+            '<option value="גזר דין"' + (isEdit && hearingData.type === 'גזר דין' ? ' selected' : '') + '>גזר דין</option>' +
+            '<option value="דיון מקדמי"' + (isEdit && hearingData.type === 'דיון מקדמי' ? ' selected' : '') + '>דיון מקדמי</option>' +
+            '<option value="ערעור"' + (isEdit && hearingData.type === 'ערעור' ? ' selected' : '') + '>ערעור</option>' +
+            '<option value="אחר"' + (isEdit && hearingData.type === 'אחר' ? ' selected' : '') + '>אחר</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label>הערות</label>' +
+          '<textarea id="hearing-notes">' + (isEdit ? escapeHtml(hearingData.notes || '') : '') + '</textarea>' +
+        '</div>' +
+        (!isEdit ? '<div class="form-group"><label class="checkbox-label"><input type="checkbox" id="hearing-calendar" checked> הוסף ליומן Google</label></div>' : '') +
+        '<div class="form-actions">' +
+          '<button type="submit" class="btn btn-primary">' + (isEdit ? 'עדכן' : 'הוסף דיון') + '</button>' +
+          '<button type="button" class="btn" onclick="closeModal()">ביטול</button>' +
+        '</div>' +
+      '</form>';
+
+      document.getElementById('modal-body').innerHTML = html;
+      openModal();
+    })
+    .withFailureHandler(handleError)
+    .getCases();
+}
+
+function editHearing(hearingData) {
+  showHearingForm(hearingData);
+}
+
+function saveHearing(e) {
+  e.preventDefault();
+  showLoading();
+
+  const hearingData = {
+    caseId: document.getElementById('hearing-case').value,
+    date: document.getElementById('hearing-date').value,
+    time: document.getElementById('hearing-time').value,
+    court: document.getElementById('hearing-court').value,
+    hall: document.getElementById('hearing-hall').value,
+    type: document.getElementById('hearing-type').value,
+    notes: document.getElementById('hearing-notes').value,
+    addToCalendar: document.getElementById('hearing-calendar') ? document.getElementById('hearing-calendar').checked : false
+  };
+
+  const idField = document.getElementById('hearing-id');
+  if (idField) {
+    hearingData.id = idField.value;
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadHearings();
+      })
+      .withFailureHandler(handleError)
+      .updateHearing(hearingData);
+  } else {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadHearings();
+      })
+      .withFailureHandler(handleError)
+      .addHearing(hearingData);
+  }
+}
+
+function confirmDeleteHearing(id) {
+  if (confirm('האם אתה בטוח שברצונך למחוק דיון זה?')) {
+    showLoading();
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadHearings();
+      })
+      .withFailureHandler(handleError)
+      .deleteHearing(id);
+  }
+}
+
+// ============================================
+// === משימות ===
+// ============================================
+
+function loadTasks() {
+  showLoading();
+  google.script.run
+    .withSuccessHandler(function(tasks) {
+      hideLoading();
+      allTasks = tasks;
+      renderTasksList(tasks);
+    })
+    .withFailureHandler(handleError)
+    .getTasks();
+}
+
+function renderTasksList(tasks) {
+  const container = document.getElementById('tasks-list');
+  let filteredTasks = tasks;
+
+  if (currentTaskFilter !== 'all') {
+    filteredTasks = tasks.filter(t => t.status === currentTaskFilter);
+  }
+
+  if (filteredTasks.length === 0) {
+    container.innerHTML = '<div class="empty-state">אין משימות להצגה</div>';
+    return;
+  }
+
+  container.innerHTML = filteredTasks.map(t => {
+    const priorityClass = getPriorityClass(t.priority);
+    const priorityLabel = getPriorityLabel(t.priority);
+    const dueDate = t.dueDate ? formatDate(new Date(t.dueDate)) : '';
+    const isOverdue = t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'הושלם';
+    const isCompleted = t.status === 'הושלם';
+
+    return '<div class="task-item priority-' + priorityClass + (isCompleted ? ' completed' : '') + '">' +
+      '<input type="checkbox" class="task-checkbox" ' + (isCompleted ? 'checked' : '') +
+      ' onchange="toggleTask(\'' + t.id + '\', this.checked)">' +
+      '<div class="task-info">' +
+        '<div class="task-description">' + escapeHtml(t.description) + '</div>' +
+        '<div class="task-meta">' +
+          (t.clientName ? '<span>' + escapeHtml(t.clientName) + '</span>' : '') +
+          (dueDate ? '<span' + (isOverdue ? ' class="task-overdue"' : '') + '>יעד: ' + dueDate + '</span>' : '') +
+          '<span class="task-priority ' + priorityClass + '">' + priorityLabel + '</span>' +
+          '<span>' + escapeHtml(t.status) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="action-buttons">' +
+        '<button class="btn-icon" title="עריכה" onclick=\'editTask(' + JSON.stringify(t).replace(/'/g, "\\'") + ')\'>✏️</button>' +
+        '<button class="btn-icon" title="מחיקה" onclick="confirmDeleteTask(\'' + t.id + '\')">🗑️</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function filterTasks(filter, btn) {
+  currentTaskFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTasksList(allTasks);
+}
+
+function showTaskForm(taskData) {
+  const isEdit = !!taskData;
+  document.getElementById('modal-title').textContent = isEdit ? 'עריכת משימה' : 'משימה חדשה';
+
+  // טעינת תיקים
+  google.script.run
+    .withSuccessHandler(function(cases) {
+      let caseOptions = '<option value="">ללא תיק</option>';
+      cases.forEach(c => {
+        const selected = (isEdit && taskData.caseId === c.id) ? ' selected' : '';
+        caseOptions += '<option value="' + c.id + '"' + selected + '>' +
+          escapeHtml(c.caseNumber || 'ללא מספר') + ' - ' + escapeHtml(c.clientName) + '</option>';
+      });
+
+      const dateValue = isEdit && taskData.dueDate ? formatDateForInput(new Date(taskData.dueDate)) : '';
+
+      const html = '<form id="task-form" onsubmit="saveTask(event)">' +
+        (isEdit ? '<input type="hidden" id="task-id" value="' + taskData.id + '">' : '') +
+        '<div class="form-group">' +
+          '<label>תיאור משימה *</label>' +
+          '<textarea id="task-description" required>' + (isEdit ? escapeHtml(taskData.description || '') : '') + '</textarea>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label>שייך לתיק</label>' +
+          '<select id="task-case">' + caseOptions + '</select>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div class="form-group">' +
+            '<label>תאריך יעד</label>' +
+            '<input type="date" id="task-due-date" value="' + dateValue + '">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>עדיפות</label>' +
+            '<select id="task-priority">' +
+              '<option value="דחוף"' + (isEdit && taskData.priority === 'דחוף' ? ' selected' : '') + '>דחוף</option>' +
+              '<option value="גבוה"' + (isEdit && taskData.priority === 'גבוה' ? ' selected' : '') + '>גבוה</option>' +
+              '<option value="רגיל"' + (!isEdit || taskData.priority === 'רגיל' ? ' selected' : '') + '>רגיל</option>' +
+              '<option value="נמוך"' + (isEdit && taskData.priority === 'נמוך' ? ' selected' : '') + '>נמוך</option>' +
+            '</select>' +
+          '</div>' +
+        '</div>' +
+        (isEdit ? '<div class="form-group">' +
+          '<label>סטטוס</label>' +
+          '<select id="task-status">' +
+            '<option value="ממתין"' + (taskData.status === 'ממתין' ? ' selected' : '') + '>ממתין</option>' +
+            '<option value="בטיפול"' + (taskData.status === 'בטיפול' ? ' selected' : '') + '>בטיפול</option>' +
+            '<option value="הושלם"' + (taskData.status === 'הושלם' ? ' selected' : '') + '>הושלם</option>' +
+          '</select>' +
+        '</div>' : '') +
+        '<div class="form-group">' +
+          '<label>הערות</label>' +
+          '<textarea id="task-notes">' + (isEdit ? escapeHtml(taskData.notes || '') : '') + '</textarea>' +
+        '</div>' +
+        '<div class="form-actions">' +
+          '<button type="submit" class="btn btn-primary">' + (isEdit ? 'עדכן' : 'הוסף משימה') + '</button>' +
+          '<button type="button" class="btn" onclick="closeModal()">ביטול</button>' +
+        '</div>' +
+      '</form>';
+
+      document.getElementById('modal-body').innerHTML = html;
+      openModal();
+    })
+    .withFailureHandler(handleError)
+    .getCases();
+}
+
+function editTask(taskData) {
+  showTaskForm(taskData);
+}
+
+function saveTask(e) {
+  e.preventDefault();
+  showLoading();
+
+  const taskData = {
+    description: document.getElementById('task-description').value,
+    caseId: document.getElementById('task-case').value,
+    dueDate: document.getElementById('task-due-date').value,
+    priority: document.getElementById('task-priority').value,
+    notes: document.getElementById('task-notes').value
+  };
+
+  const statusField = document.getElementById('task-status');
+  if (statusField) taskData.status = statusField.value;
+
+  const idField = document.getElementById('task-id');
+  if (idField) {
+    taskData.id = idField.value;
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadTasks();
+      })
+      .withFailureHandler(handleError)
+      .updateTask(taskData);
+  } else {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        closeModal();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadTasks();
+      })
+      .withFailureHandler(handleError)
+      .addTask(taskData);
+  }
+}
+
+function toggleTask(taskId, isChecked) {
+  const newStatus = isChecked ? 'הושלם' : 'ממתין';
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showToast(isChecked ? 'משימה הושלמה!' : 'משימה נפתחה מחדש', 'success');
+      loadTasks();
+    })
+    .withFailureHandler(handleError)
+    .updateTaskStatus(taskId, newStatus);
+}
+
+function markTaskDone(taskId) {
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showToast('משימה הושלמה!', 'success');
+      loadDashboard();
+    })
+    .withFailureHandler(handleError)
+    .updateTaskStatus(taskId, 'הושלם');
+}
+
+function confirmDeleteTask(id) {
+  if (confirm('האם אתה בטוח שברצונך למחוק משימה זו?')) {
+    showLoading();
+    google.script.run
+      .withSuccessHandler(function(result) {
+        hideLoading();
+        showToast(result.message, result.success ? 'success' : 'error');
+        if (result.success) loadTasks();
+      })
+      .withFailureHandler(handleError)
+      .deleteTask(id);
+  }
+}
+
+// ============================================
+// === חיפוש ===
+// ============================================
+
+let searchTimeout;
+function handleSearch(query) {
+  clearTimeout(searchTimeout);
+  const resultsDiv = document.getElementById('searchResults');
+
+  if (query.length < 2) {
+    resultsDiv.classList.add('hidden');
+    return;
+  }
+
+  searchTimeout = setTimeout(function() {
+    google.script.run
+      .withSuccessHandler(function(results) {
+        if (results.length === 0) {
+          resultsDiv.innerHTML = '<div class="search-result-item">לא נמצאו תוצאות</div>';
+        } else {
+          resultsDiv.innerHTML = results.map(r => {
+            return '<div class="search-result-item" onclick="navigateToResult(\'' + r.type + '\', \'' + r.id + '\')">' +
+              '<span>' + escapeHtml(r.text) + (r.detail ? ' - ' + escapeHtml(r.detail) : '') + '</span>' +
+              '<span class="search-result-type">' + r.type + '</span>' +
+            '</div>';
+          }).join('');
+        }
+        resultsDiv.classList.remove('hidden');
+      })
+      .withFailureHandler(handleError)
+      .globalSearch(query);
+  }, 300);
+}
+
+function navigateToResult(type, id) {
+  document.getElementById('searchResults').classList.add('hidden');
+  document.getElementById('globalSearch').value = '';
+
+  switch(type) {
+    case 'לקוח': showPage('clients'); break;
+    case 'תיק': showPage('cases'); break;
+  }
+}
+
+// ============================================
+// === פונקציות עזר ===
+// ============================================
+
+function openModal() {
+  document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+function closeModal(event) {
+  if (event && event.target !== document.getElementById('modal-overlay')) return;
+  document.getElementById('modal-overlay').classList.add('hidden');
+}
+
+function showLoading() {
+  document.getElementById('loading').classList.remove('hidden');
+}
+
+function hideLoading() {
+  document.getElementById('loading').classList.add('hidden');
+}
+
+function showToast(message, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.className = 'toast ' + (type || '');
+  toast.classList.remove('hidden');
+
+  setTimeout(function() {
+    toast.classList.add('hidden');
+  }, 3000);
+}
+
+function handleError(error) {
+  hideLoading();
+  showToast('שגיאה: ' + error.message, 'error');
+  console.error(error);
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(str));
+  return div.innerHTML;
+}
+
+function formatDate(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return day + '/' + month + '/' + year;
+}
+
+function formatDateForInput(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return year + '-' + month + '-' + day;
+}
+
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate();
+}
+
+function getStatusBadge(status) {
+  const statusMap = {
+    'פתוח': 'open',
+    'בטיפול': 'active',
+    'ממתין לדיון': 'waiting',
+    'ממתין לפסק דין': 'waiting',
+    'סגור': 'closed'
+  };
+  const cls = statusMap[status] || 'open';
+  return '<span class="status-badge status-' + cls + '">' + escapeHtml(status) + '</span>';
+}
+
+function getPriorityClass(priority) {
+  const map = { 'דחוף': 'urgent', 'גבוה': 'high', 'רגיל': 'normal', 'נמוך': 'low' };
+  return map[priority] || 'normal';
+}
+
+function getPriorityLabel(priority) {
+  return priority || 'רגיל';
+}
+
+// סגירת תוצאות חיפוש בלחיצה מחוץ
+document.addEventListener('click', function(e) {
+  const searchResults = document.getElementById('searchResults');
+  const searchInput = document.getElementById('globalSearch');
+  if (searchResults && !searchResults.contains(e.target) && e.target !== searchInput) {
+    searchResults.classList.add('hidden');
+  }
+});
+</script>
