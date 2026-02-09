@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <!-- סרגל ניווט עליון -->
+  <div class="navbar">
+    <div class="navbar-brand">
+      <span class="logo-icon">⚖️</span>
+      <span class="logo-text">ניהול לקוחות - תעבורה</span>
+    </div>
+    <div class="navbar-search">
+      <input type="text" id="globalSearch" placeholder="חיפוש לקוח, תיק, או מספר..." oninput="handleSearch(this.value)">
+      <div id="searchResults" class="search-results hidden"></div>
+    </div>
+  </div>
+
+  <!-- תפריט צד -->
+  <div class="sidebar">
+    <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+      <span class="nav-icon">📊</span>
+      <span class="nav-text">דשבורד</span>
+    </div>
+    <div class="nav-item" data-page="clients" onclick="showPage('clients')">
+      <span class="nav-icon">👥</span>
+      <span class="nav-text">לקוחות</span>
+    </div>
+    <div class="nav-item" data-page="cases" onclick="showPage('cases')">
+      <span class="nav-icon">📁</span>
+      <span class="nav-text">תיקים</span>
+    </div>
+    <div class="nav-item" data-page="hearings" onclick="showPage('hearings')">
+      <span class="nav-icon">📅</span>
+      <span class="nav-text">דיונים</span>
+    </div>
+    <div class="nav-item" data-page="tasks" onclick="showPage('tasks')">
+      <span class="nav-icon">✅</span>
+      <span class="nav-text">משימות</span>
+    </div>
+  </div>
+
+  <!-- תוכן ראשי -->
+  <div class="main-content">
+
+    <!-- ===== דשבורד ===== -->
+    <div id="page-dashboard" class="page active">
+      <h2 class="page-title">דשבורד</h2>
+
+      <!-- כרטיסי סטטיסטיקה -->
+      <div class="stats-grid">
+        <div class="stat-card blue">
+          <div class="stat-number" id="stat-clients">0</div>
+          <div class="stat-label">לקוחות</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-number" id="stat-cases">0</div>
+          <div class="stat-label">תיקים פתוחים</div>
+        </div>
+        <div class="stat-card orange">
+          <div class="stat-number" id="stat-tasks">0</div>
+          <div class="stat-label">משימות פתוחות</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-number" id="stat-urgent">0</div>
+          <div class="stat-label">פריטים דחופים</div>
+        </div>
+      </div>
+
+      <!-- דיונים היום -->
+      <div class="card">
+        <div class="card-header">
+          <h3>📅 דיונים היום</h3>
+        </div>
+        <div class="card-body" id="today-hearings">
+          <div class="empty-state">אין דיונים היום</div>
+        </div>
+      </div>
+
+      <!-- דיונים קרובים -->
+      <div class="card">
+        <div class="card-header">
+          <h3>🗓️ דיונים ב-7 ימים הקרובים</h3>
+        </div>
+        <div class="card-body" id="upcoming-hearings">
+          <div class="empty-state">טוען...</div>
+        </div>
+      </div>
+
+      <!-- משימות באיחור -->
+      <div class="card">
+        <div class="card-header">
+          <h3>⚠️ משימות באיחור</h3>
+        </div>
+        <div class="card-body" id="overdue-tasks">
+          <div class="empty-state">אין משימות באיחור</div>
+        </div>
+      </div>
+
+      <!-- משימות פתוחות -->
+      <div class="card">
+        <div class="card-header">
+          <h3>📋 משימות פתוחות</h3>
+        </div>
+        <div class="card-body" id="open-tasks-dashboard">
+          <div class="empty-state">טוען...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== דף לקוחות ===== -->
+    <div id="page-clients" class="page">
+      <div class="page-header">
+        <h2 class="page-title">ניהול לקוחות</h2>
+        <button class="btn btn-primary" onclick="showClientForm()">+ לקוח חדש</button>
+      </div>
+
+      <div class="table-container">
+        <table class="data-table" id="clients-table">
+          <thead>
+            <tr>
+              <th>שם מלא</th>
+              <th>ת.ז.</th>
+              <th>טלפון</th>
+              <th>אימייל</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody id="clients-tbody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===== דף תיקים ===== -->
+    <div id="page-cases" class="page">
+      <div class="page-header">
+        <h2 class="page-title">ניהול תיקים</h2>
+        <button class="btn btn-primary" onclick="showCaseForm()">+ תיק חדש</button>
+      </div>
+
+      <div class="table-container">
+        <table class="data-table" id="cases-table">
+          <thead>
+            <tr>
+              <th>מספר תיק</th>
+              <th>לקוח</th>
+              <th>סוג עבירה</th>
+              <th>בית משפט</th>
+              <th>סטטוס</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody id="cases-tbody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===== דף דיונים ===== -->
+    <div id="page-hearings" class="page">
+      <div class="page-header">
+        <h2 class="page-title">ניהול דיונים</h2>
+        <button class="btn btn-primary" onclick="showHearingForm()">+ דיון חדש</button>
+      </div>
+
+      <div class="table-container">
+        <table class="data-table" id="hearings-table">
+          <thead>
+            <tr>
+              <th>תאריך</th>
+              <th>שעה</th>
+              <th>לקוח</th>
+              <th>מספר תיק</th>
+              <th>בית משפט</th>
+              <th>אולם</th>
+              <th>סוג</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody id="hearings-tbody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===== דף משימות ===== -->
+    <div id="page-tasks" class="page">
+      <div class="page-header">
+        <h2 class="page-title">ניהול משימות</h2>
+        <button class="btn btn-primary" onclick="showTaskForm()">+ משימה חדשה</button>
+      </div>
+
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="filterTasks('all', this)">הכל</button>
+        <button class="filter-btn" onclick="filterTasks('ממתין', this)">ממתין</button>
+        <button class="filter-btn" onclick="filterTasks('בטיפול', this)">בטיפול</button>
+        <button class="filter-btn" onclick="filterTasks('הושלם', this)">הושלם</button>
+      </div>
+
+      <div id="tasks-list" class="tasks-list">
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== מודל (חלון קופץ) ===== -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="modal-title">כותרת</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body">
+      </div>
+    </div>
+  </div>
+
+  <!-- הודעת Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- טעינה -->
+  <div id="loading" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <div class="loading-text">טוען...</div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
