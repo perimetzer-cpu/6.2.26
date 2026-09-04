@@ -1,0 +1,7 @@
+{
+  "name": "תוכנה כמעט סופית חתימה",
+  "description": "A comprehensive Hebrew/English electronic signature platform with multi-signer support, automatic reminders, and Google Drive integration.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
